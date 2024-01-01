@@ -71,7 +71,7 @@ class Trajectory:
     def random_changes(self, max_change_px: float, num_changes: int, map: list):
         """randomly change the trajectory"""
         for i in range(num_changes):
-            idx = random.randint(0, len(self.x)-1)
+            idx = random.randint(0, len(self.x)-2) #exclude last point
             x = self.x[idx]
             y = self.y[idx]
             #test different changes - keep the first one which is in free space
@@ -81,6 +81,10 @@ class Trajectory:
 
                 self.x[idx] = x + change_x
                 self.y[idx] = y + change_y
+                #if first point is moved, last point needs to move, too!
+                if idx == 0:
+                    self.x[-1] = self.x[idx]
+                    self.y[-1] = self.x[idx]
 
                 if map[ int(self.y[idx]) ][ int(self.x[idx]) ] == 0.0:
                     break
