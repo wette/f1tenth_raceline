@@ -133,17 +133,43 @@ class Trajectory:
             self.laptime += length/speed
 
         #add length from last back to first.
-        x2 = self.x[-1] - self.x[0]
-        x2 *= x2
-        y2 = self.y[-1] - self.y[0]
-        y2 *= y2
-        
-        length = math.sqrt( x2 + y2 )
-        speed = (self.velocity_profile[i] + self.velocity_profile[i+1])/2.0
-        self.laptime += length/speed
+        #x2 = self.x[-1] - self.x[0]
+        #x2 *= x2
+        #y2 = self.y[-1] - self.y[0]
+        #y2 *= y2
+        #
+        #length = math.sqrt( x2 + y2 )
+        #speed = (self.velocity_profile[i] + self.velocity_profile[i+1])/2.0
+        #self.laptime += length/speed
 
         return self.laptime
 
+
+    def compute_normal_vector(self, idx: int):
+        """compute the normalized (orthogonal) normal vector for point with index idx"""
+        prev_x = self.x[(idx-1) % len(self.x)]
+        prev_y = self.y[(idx-1) % len(self.y)]
+        next_x = self.x[(idx+1) % len(self.x)]
+        next_y = self.y[(idx+1) % len(self.y)]
+
+        dx = next_x-prev_x
+        dy = next_y-prev_y
+
+        orto_dx = -dy
+        orto_dy = dx
+
+        length = math.sqrt(orto_dx*orto_dx + orto_dy*orto_dy)
+
+        return orto_dx/length, orto_dy/length
+    
+    def compute_random_vector(self):
+        """compute a normalized random vector"""
+        dx = 1.0-random.random()*2.0
+        dy = 1.0-random.random()*2.0
+
+        length = math.sqrt(dx*dx + dy*dy)
+
+        return dx/length, dy/length
 
     def random_changes(self, max_change_px: float, num_changes: int, map: list):
         """randomly change the trajectory"""
@@ -153,15 +179,16 @@ class Trajectory:
             y = self.y[idx]
             #test different changes - keep the first one which is in free space
             while True:
-                change_x = max_change_px - random.random()*max_change_px*2.0
-                change_y = max_change_px - random.random()*max_change_px*2.0
+                normalx, normaly = self.compute_random_vector() #self.compute_normal_vector(idx)
+                change = random.random()*max_change_px
 
-                self.x[idx] = x + change_x
-                self.y[idx] = y + change_y
+                self.x[idx] = x + change*normalx
+                self.y[idx] = y + change*normaly
                 #if first point is moved, last point needs to move, too!
                 if idx == 0:
-                    self.x[-1] = self.x[idx]
-                    self.y[-1] = self.x[idx]
+                    self.x[len(self.x)-1] = self.x[idx]
+                    self.y[len(self.y)-1] = self.y[idx]
+                    
 
                 if map[ int(self.y[idx]) ][ int(self.x[idx]) ] == 0.0:
                     break
@@ -178,6 +205,10 @@ class Trajectory:
         for i in range(start_idx, end_idx):
             self.x[i] = other_trajectory.x[i]
             self.y[i] = other_trajectory.y[i]
+
+        #make sure last and first point are the same:
+        self.x[0] = self.x[len(self.x)-1]
+        self.y[0] = self.y[len(self.y)-1]
 
         #apply spline smoothing
         self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=len(self.y))

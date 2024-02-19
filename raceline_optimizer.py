@@ -110,6 +110,7 @@ class RacelineOptimizer:
             t = initial_trajectory.copy()
             t.random_changes(max_change_in_pixels, num_changes_per_mutation, self.__map)
             population.append(t)
+        population.append(initial_trajectory.copy()) #keep in the original one w/o modifications
 
         #remove all but the top racelines
         population = remove_all_but_top(population, num_keep)
@@ -128,6 +129,7 @@ class RacelineOptimizer:
             for rl in new_childs:
                 rl.random_changes(max_change_in_pixels, num_changes_per_mutation, self.__map)
             
+            new_childs += population[:] #copy over old trajectories to new childs for random_combination
             
             #combine
             combined_childs = []
@@ -138,7 +140,7 @@ class RacelineOptimizer:
                 combined = new_childs[i].copy()
                 combined.random_combination(new_childs[j])
                 combined_childs.append( combined )
-
+            
             #add new children to population:
             for l in new_childs:
                 population.append(l)
@@ -149,9 +151,10 @@ class RacelineOptimizer:
             vehicle_width_in_map_pixels = math.ceil(population[0].vehicle_width_m / self.__config['resolution'])
             for l in population[:]:
                 lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(l.x, l.y, num=500)
-                x2,y2,_,_,_    = pyspline.calc_2d_spline_interpolation([l.x[-1], l.x[0]], [l.y[-1], l.y[0]], num=30)
-                lx +=x2
-                ly +=y2
+                #connect first with last point of the spline
+                #x2,y2,_,_,_    = pyspline.calc_2d_spline_interpolation([l.x[-1], l.x[0]], [l.y[-1], l.y[0]], num=30)
+                #lx +=x2
+                #ly +=y2
 
                 #for each point of the trajectory:
                 for i in range(len(lx)):
@@ -176,7 +179,7 @@ class RacelineOptimizer:
                 if removeTrajectory:
                     population.remove(l)
 
-            
+            print(f"Valid Population size: {len(population)}")
 
             #remove all but the top racelines
             population = remove_all_but_top(population, num_keep)
@@ -189,19 +192,42 @@ class RacelineOptimizer:
         return population[-1]
     
 
+    def test(self, t: Trajectory):
+        self.debug_draw_trajectory(t)
+        idx = 0
+        x = t.x[idx]
+        y = t.y[idx]
+        #test different changes - keep the first one which is in free space
+        normalx, normaly = t.compute_normal_vector(idx)
+        change = 10
+
+        t.x[idx] = x + change*normalx
+        t.y[idx] = y + change*normaly
+        #if first point is moved, last point needs to move, too!
+        if idx == 0:
+            t.x[len(t.x)-1] = t.x[idx]
+            t.y[len(t.y)-1] = t.y[idx]
+                
+        #apply spline smoothing
+        t.x, t.y, _, t.curvature, _ = pyspline.calc_2d_spline_interpolation(t.x, t.y, num=len(t.y))
+        t.length = None
+        t.laptime = None
+
+        self.debug_draw_trajectory(t)
+
 def main():
     haftreibung                 = 0.1
-    vehicle_width_m             = 0.25  #half width is minimum distance to any wall at any time
-    vehicle_acceleration_mss    = 10.0   #vehicle acceleration in meter/sec/sec
-    vehicle_deceleration_mss    = 15.0   #vehicle deceleration in meter/sec/sec
+    vehicle_width_m             = 0.2   #half width is minimum distance to any wall at any time
+    vehicle_acceleration_mss    = 20.0  #vehicle acceleration in meter/sec/sec
+    vehicle_deceleration_mss    = 20.0  #vehicle deceleration in meter/sec/sec
 
-    desired_points_per_meter    = 0.8#0.4   #how many control points to use during optimization per spline
-    max_change_per_point_meters = 0.3#0.1   #how much change to a contorlpoint per iteration in meters
+    desired_points_per_meter    = 0.4   #how many control points to use during optimization per spline (you want as few as possible!)
+    max_change_per_point_meters = 0.15   #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
 
-    num_epochs                  = 50    #number of optimization epochs
-    num_keep                    = 10#5     #number of trajectories to keep after each epoch
-    num_population              = 200   #population size during epoch
-    num_changes_per_mutation    = 1     #number of controlpoint changes during a mutation
+    num_epochs                  = 100    #number of optimization epochs
+    num_keep                    = 3      #number of trajectories to keep after each epoch
+    num_population              = 200    #population size during epoch
+    num_changes_per_mutation    = 2      #number of controlpoint changes during a mutation
 
     opt = RacelineOptimizer("my_map.yaml")
     
@@ -224,11 +250,11 @@ def main():
     x,y, _, _, path_len = pyspline.calc_2d_spline_interpolation(x, y, num=num_ctrl_points)
 
     #opt.debug_draw_trajectory(Trajectory(x,y))
-
     
 
     #use genetic algorithm to optimize x,y
     original = Trajectory(x, y, haftreibung, vehicle_width_m, vehicle_acceleration_mss, vehicle_deceleration_mss, opt.get_config()["resolution"])
+    #opt.test(original)
     raceline = opt.optimize_raceline(initial_trajectory=original, num_epochs=num_epochs, num_keep=num_keep, num_population=num_population, 
                                     num_changes_per_mutation=num_changes_per_mutation, 
                                     max_change_in_pixels=max_change_per_point_meters/opt.get_config()["resolution"])
