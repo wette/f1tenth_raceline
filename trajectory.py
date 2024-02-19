@@ -1,6 +1,7 @@
 import random
 import math
 import pycubicspline.pycubicspline as pyspline
+import numpy
 
 class Trajectory:
     def __init__(self, x: list, y: list, haftreibung: float, vehicle_width_m: float, 
@@ -33,12 +34,16 @@ class Trajectory:
 
         # we now need to resitict speed on the straights such that we have enough braking power to decelerate
         # to this end, find the lowest speed, and go back over the trajectory and decrease speeds if nececcary
-        copyVeloProfile = self.velocity_profile.copy()
+        processedList = []
 
-        for numProcessed in range(len(copyVeloProfile)):
+        for numProcessed in range(len(self.x)):
             #find lowest speed and go backwards
-            i = copyVeloProfile.index(min(copyVeloProfile))
-            copyVeloProfile[i] = math.inf    #to not find this point again
+            sortedIds = list(numpy.argsort(self.velocity_profile))
+            for i in processedList:
+                sortedIds.remove(i)
+
+            i = sortedIds[0]
+
             origi = i
             velocity = self.velocity_profile[i] #speed at this waypoint (m/s) #TODO: this is not correct: must be average speed, not minimum!!
             xd = self.x[i-1] - self.x[i]
@@ -50,15 +55,17 @@ class Trajectory:
                 i = (i - 1) % len(self.velocity_profile)
 
             #do the same thing forwards, to compute realistic velocity based on the vehicle acceleration
-            i = origi
+            """i = origi
             velocity = self.velocity_profile[i] #speed at this waypoint (m/s) #TODO: this is not correct: must be average speed, not minimum!!
             xd = self.x[i] - self.x[(i+1) % len(self.velocity_profile)]
             yd = self.y[i] - self.y[(i+1) % len(self.velocity_profile)]
             way = math.sqrt(xd*xd+yd*yd)*self.resolution #distance from this to next waypoint (m)
             time = way/velocity # (s)
-            while self.velocity_profile[(i+1) % len(self.velocity_profile)]-self.vehicle_acceleration_mss*time > self.velocity_profile[i]:
+            while self.velocity_profile[(i+1) % len(self.velocity_profile)] > self.velocity_profile[i] + self.vehicle_acceleration_mss*time:
                 self.velocity_profile[(i+1) % len(self.velocity_profile)] = self.velocity_profile[i]+self.vehicle_acceleration_mss*time
                 i = (i + 1) % len(self.velocity_profile)
+            """
+            processedList.append(origi) #point processed
         
     
     def get_length(self) -> int:
