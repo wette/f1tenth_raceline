@@ -1,3 +1,5 @@
+from trajectory import Trajectory
+import pycubicspline.pycubicspline as pyspline
 
 class Map:
     def __init__(self, image_file: str, origin: list, resolution: float):
@@ -6,8 +8,36 @@ class Map:
         self.__origin_x = int(origin[0] / resolution * -1.0)
         self.__origin_y = int(origin[1] / resolution * -1.0)
 
+        self.__origin = origin.copy()
+        self.__resolution = resolution
+
         self.binarize_image()
         self.region_growing()
+
+    def safe_trajectory_to_file(self, trajectory: Trajectory, file: str, num_points: int):
+        """ write computed trajectory to file """
+
+        f = open(file, "w")
+        f.write("x\ty\tvelocity[m]\n")
+
+        x,y, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x, trajectory.y, num=num_points)
+
+        trajectory = Trajectory(x, y, trajectory.haftreibung, trajectory.vehicle_width_m, trajectory.vehicle_acceleration_mss, trajectory.vehicle_deceleration_mss, trajectory.resolution)
+        trajectory.compute_velocity_profile()
+
+        for i in range(len(trajectory.x)):
+            x_px = trajectory.x[i]
+            y_px = trajectory.y[i]
+
+            #transform pixel to coordinates
+            #TODO: Check if x and y should be swapped around!
+            x = x_px * self.__resolution + self.__origin[0]
+            y = y_px * self.__resolution + self.__origin[1]
+
+            f.write(f"{x}\t{y}\t{trajectory.velocity_profile[i]}\n")
+
+        f.close()
+        
 
     #override []-operator
     def __getitem__(self, key):
