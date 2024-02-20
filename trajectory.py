@@ -22,6 +22,37 @@ class Trajectory:
         #if self.curvature is None:
         self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=len(self.y))
 
+
+    def adjust_velocity_to_acceleration_backwards_pass(self, i: int):
+        """adjust velocity profile to be physically possible"""
+        while True:
+            velocity = self.velocity_profile[i] #speed at this waypoint (m/s) #TODO: this is not correct: must be average speed, not minimum!!
+            xd = self.x[i-1] - self.x[i]
+            yd = self.y[i-1] - self.y[i]
+            way = math.sqrt(xd*xd+yd*yd)*self.resolution #distance from last to this waypoint (m)
+            time = way/velocity # (s)
+            if self.velocity_profile[(i-1) % len(self.velocity_profile)]-self.vehicle_deceleration_mss*time > self.velocity_profile[i]:
+                self.velocity_profile[(i-1) % len(self.velocity_profile)] = self.velocity_profile[i]+self.vehicle_deceleration_mss*time
+                i = (i - 1) % len(self.velocity_profile)
+            else:
+                break
+
+    def adjust_velocity_to_acceleration_forwards_pass(self, i: int):
+        """adjust velocity profile to be physically possible"""
+        while True:
+            velocity = self.velocity_profile[i] #speed at this waypoint (m/s) #TODO: this is not correct: must be average speed, not minimum!!
+            xd = self.x[i] - self.x[(i+1) % len(self.velocity_profile)]
+            yd = self.y[i] - self.y[(i+1) % len(self.velocity_profile)]
+            way = math.sqrt(xd*xd+yd*yd)*self.resolution #distance from this to next waypoint (m)
+            time = way/velocity # (s)
+            if self.velocity_profile[(i+1) % len(self.velocity_profile)] > self.velocity_profile[i] + self.vehicle_acceleration_mss*time:
+                self.velocity_profile[(i+1) % len(self.velocity_profile)] = self.velocity_profile[i]+self.vehicle_acceleration_mss*time
+                i = (i + 1) % len(self.velocity_profile)
+            else:
+                break
+
+        
+
     def compute_velocity_profile(self):
         """for each point on the spline, compute the max. possible velocity given a certain traction"""
         #formula taken from https://www.johannes-strommer.com/fahrzeug-formeln/geschwindigkeit-in-kurven/
@@ -44,28 +75,13 @@ class Trajectory:
 
             i = sortedIds[0]
 
-            origi = i
-            velocity = self.velocity_profile[i] #speed at this waypoint (m/s) #TODO: this is not correct: must be average speed, not minimum!!
-            xd = self.x[i-1] - self.x[i]
-            yd = self.y[i-1] - self.y[i]
-            way = math.sqrt(xd*xd+yd*yd)*self.resolution #distance from last to this waypoint (m)
-            time = way/velocity # (s)
-            while self.velocity_profile[(i-1) % len(self.velocity_profile)]-self.vehicle_deceleration_mss*time > self.velocity_profile[i]:
-                self.velocity_profile[(i-1) % len(self.velocity_profile)] = self.velocity_profile[i]+self.vehicle_deceleration_mss*time
-                i = (i - 1) % len(self.velocity_profile)
+            #go backwards over the trajectory and decrease speeds if nececcary
+            self.adjust_velocity_to_acceleration_backwards_pass(i)
 
             #do the same thing forwards, to compute realistic velocity based on the vehicle acceleration
-            """i = origi
-            velocity = self.velocity_profile[i] #speed at this waypoint (m/s) #TODO: this is not correct: must be average speed, not minimum!!
-            xd = self.x[i] - self.x[(i+1) % len(self.velocity_profile)]
-            yd = self.y[i] - self.y[(i+1) % len(self.velocity_profile)]
-            way = math.sqrt(xd*xd+yd*yd)*self.resolution #distance from this to next waypoint (m)
-            time = way/velocity # (s)
-            while self.velocity_profile[(i+1) % len(self.velocity_profile)] > self.velocity_profile[i] + self.vehicle_acceleration_mss*time:
-                self.velocity_profile[(i+1) % len(self.velocity_profile)] = self.velocity_profile[i]+self.vehicle_acceleration_mss*time
-                i = (i + 1) % len(self.velocity_profile)
-            """
-            processedList.append(origi) #point processed
+            self.adjust_velocity_to_acceleration_forwards_pass(i)
+
+            processedList.append(i) #point processed
         
     
     def get_length(self) -> int:
