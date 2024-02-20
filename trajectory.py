@@ -19,8 +19,34 @@ class Trajectory:
 
         self.velocity_profile = None #for each point the velocity of the vehicle in meters/second
 
-        #if self.curvature is None:
+        self.do_forwards_pass = False #gives straighter lines as there is more emphasis on acceleration
+
         self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=len(self.y))
+        self.remove_overlapping_points()
+
+    def remove_overlapping_points(self):
+        """remove points at the end of the spline that overlap with points at the beginning at the spline."""
+        eps = 1
+        toRemove = []
+        for i in range(len(self.x)-1, 1, -1):
+            found = False
+            for j in range(1, len(self.x)):
+                if i == j:
+                    continue
+                dx = self.x[i]-self.x[j]
+                dy = self.y[i]-self.y[j]
+                l2 = math.sqrt(dx*dx+dy*dy)
+                if(l2 < eps):
+                    #same point - remove.
+                    toRemove.append(i)
+                    found = True
+            if not found:
+                break
+
+        for i in toRemove:
+            self.x.pop(i)
+            self.y.pop(i)
+            self.curvature.pop(i)
 
 
     def adjust_velocity_to_acceleration_backwards_pass(self, i: int):
@@ -79,7 +105,8 @@ class Trajectory:
             self.adjust_velocity_to_acceleration_backwards_pass(i)
 
             #do the same thing forwards, to compute realistic velocity based on the vehicle acceleration
-            self.adjust_velocity_to_acceleration_forwards_pass(i)
+            if self.do_forwards_pass:
+                self.adjust_velocity_to_acceleration_forwards_pass(i)
 
             processedList.append(i) #point processed
         
@@ -239,7 +266,12 @@ class Trajectory:
         self.laptime = None
 
     def copy(self) -> 'Trajectory':
+        t = None
         if self.curvature is not None:
-            return Trajectory(self.x[:], self.y[:], self.haftreibung, self.vehicle_width_m, self.vehicle_acceleration_mss, self.vehicle_deceleration_mss, self.resolution, self.curvature[:])
+            t = Trajectory(self.x[:], self.y[:], self.haftreibung, self.vehicle_width_m, self.vehicle_acceleration_mss, self.vehicle_deceleration_mss, self.resolution, self.curvature[:])
         else:
-            return Trajectory(self.x[:], self.y[:], self.haftreibung, self.vehicle_width_m, self.vehicle_acceleration_mss, self.vehicle_deceleration_mss, self.resolution)
+            t = Trajectory(self.x[:], self.y[:], self.haftreibung, self.vehicle_width_m, self.vehicle_acceleration_mss, self.vehicle_deceleration_mss, self.resolution)
+
+        t.do_forwards_pass = self.do_forwards_pass
+
+        return t

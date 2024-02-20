@@ -35,12 +35,20 @@ class RacelineOptimizer:
 
     def debug_draw_trajectory(self, trajectory : Trajectory, filename: str = None):
         pyplot.imshow(self.__map.get_pixel_map())
-        lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x, trajectory.y, num=300)
+
+        #add the second point of the spine as last, too -> nicer circle
+        xs = trajectory.x[:]
+        xs.append(trajectory.x[1])
+        ys = trajectory.y[:]
+        ys.append(trajectory.y[1])
+        lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(xs, ys, num=300)
 
         rl = Trajectory(lx, ly, trajectory.haftreibung, trajectory.vehicle_width_m, trajectory.vehicle_acceleration_mss, trajectory.vehicle_deceleration_mss, trajectory.resolution)
+        rl.do_forwards_pass = True
         rl.compute_velocity_profile()
+        print(f"Raceline with 300 points time: {rl.get_laptime()}")
 
-        pyplot.scatter(lx,ly, c=rl.velocity_profile, linewidth=1, cmap=pyplot.cm.coolwarm)
+        pyplot.scatter(rl.x,rl.y, c=rl.velocity_profile, linewidth=1, cmap=pyplot.cm.coolwarm)
         pyplot.colorbar()
         #pyplot.plot(lx,ly)
         #pyplot.scatter(trajectory.x, trajectory.y, marker="x")
@@ -218,13 +226,13 @@ class RacelineOptimizer:
 def main():
     haftreibung                 = 0.1
     vehicle_width_m             = 0.2   #half width is minimum distance to any wall at any time
-    vehicle_acceleration_mss    = 20.0  #vehicle acceleration in meter/sec/sec
-    vehicle_deceleration_mss    = 20.0  #vehicle deceleration in meter/sec/sec
+    vehicle_acceleration_mss    = 5.0   #vehicle acceleration in meter/sec/sec
+    vehicle_deceleration_mss    = 10.0  #vehicle deceleration in meter/sec/sec
 
     desired_points_per_meter    = 0.4   #how many control points to use during optimization per spline (you want as few as possible!)
     max_change_per_point_meters = 0.15   #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
 
-    num_epochs                  = 100    #number of optimization epochs
+    num_epochs                  = 40     #number of optimization epochs
     num_keep                    = 3      #number of trajectories to keep after each epoch
     num_population              = 200    #population size during epoch
     num_changes_per_mutation    = 2      #number of controlpoint changes during a mutation
@@ -260,10 +268,14 @@ def main():
                                     max_change_in_pixels=max_change_per_point_meters/opt.get_config()["resolution"])
 
     opt.get_map().safe_trajectory_to_file(raceline, "my_map_raceline.csv", num_points=300)
-    
+
     raceline.laptime = None
+    raceline.do_forwards_pass = True
     print(f"Raceline time: {raceline.get_laptime()}")
     opt.debug_draw_trajectory(raceline)
+
+    
+
 
 if __name__ == "__main__":
     main()
