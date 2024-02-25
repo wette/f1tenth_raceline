@@ -187,6 +187,9 @@ class RacelineOptimizer:
                 if removeTrajectory:
                     population.remove(l)
 
+            if len(population) == 0:
+                raise Exception("Not possible to find a raceline. Check parameters and initial raceline.")
+            
             print(f"Valid Population size: {len(population)}")
 
             #remove all but the top racelines
@@ -267,7 +270,7 @@ def main():
                                     num_changes_per_mutation=num_changes_per_mutation, 
                                     max_change_in_pixels=max_change_per_point_meters/opt.get_config()["resolution"])
 
-    opt.get_map().safe_trajectory_to_file(raceline, "my_map_raceline.csv", num_points=300)
+    raceline.safe_trajectory_to_file("my_map_raceline.csv", num_points=300)
 
     raceline.laptime = None
     raceline.do_forwards_pass = True

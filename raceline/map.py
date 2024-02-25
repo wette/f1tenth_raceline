@@ -20,9 +20,12 @@ class Map:
         f = open(file, "w")
         f.write("x\ty\tvelocity[m]\n")
 
-        x,y, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x, trajectory.y, num=num_points)
+        #add second point of spline to end such that the two ends of the spline form a continuous curve
+        x,y, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x + [trajectory.x[1]], trajectory.y + [trajectory.y[1]], num=num_points)
+        
 
         trajectory = Trajectory(x, y, trajectory.haftreibung, trajectory.vehicle_width_m, trajectory.vehicle_acceleration_mss, trajectory.vehicle_deceleration_mss, trajectory.resolution)
+        trajectory.do_forwards_pass = True
         trajectory.compute_velocity_profile()
 
         for i in range(len(trajectory.x)):
