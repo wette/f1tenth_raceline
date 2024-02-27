@@ -14,6 +14,15 @@ class Map:
         self.binarize_image()
         self.region_growing()
 
+    def get_origin(self):
+        return self.__origin
+
+    def get_resolution(self):
+        return self.__resolution
+
+    def get_map_size_pixels(self):
+        return len(self.__map), len(self.__map[0])
+
     def safe_trajectory_to_file(self, trajectory: Trajectory, file: str, num_points: int):
         """ write computed trajectory to file """
 

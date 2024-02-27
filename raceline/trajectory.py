@@ -265,7 +265,7 @@ class Trajectory:
         self.length = None
         self.laptime = None
 
-    def safe_trajectory_to_file(self, file: str, num_points: int):
+    def safe_trajectory_to_file(self, map: 'Map', file: str, num_points: int):
         """ write computed trajectory to file """
 
         f = open(file, "w")
@@ -274,18 +274,22 @@ class Trajectory:
         #add second point of spline to end such that the two ends of the spline form a continuous curve
         x,y, _, _, _ = pyspline.calc_2d_spline_interpolation(self.x + [self.x[1]], self.y + [self.y[1]], num=num_points)
 
-        trajectory = Trajectory(x, y, trajectory.haftreibung, trajectory.vehicle_width_m, trajectory.vehicle_acceleration_mss, trajectory.vehicle_deceleration_mss, trajectory.resolution)
+        trajectory = Trajectory(x, y, self.haftreibung, self.vehicle_width_m, self.vehicle_acceleration_mss, self.vehicle_deceleration_mss, self.resolution)
         trajectory.do_forwards_pass = True
         trajectory.compute_velocity_profile()
+
+        max_x, max_y = map.get_map_size_pixels()
+        resolution = map.get_resolution()
+        origin = map.get_origin()
+
 
         for i in range(len(trajectory.x)):
             x_px = trajectory.x[i]
             y_px = trajectory.y[i]
 
-            #transform pixel to coordinates
-            #TODO: Check if x and y should be swapped around!
-            x = x_px * self.__resolution + self.__origin[0]
-            y = y_px * self.__resolution + self.__origin[1]
+            #transform pixel to coordinates - y axis needs to be swapped around!
+            x = x_px * resolution + origin[0]
+            y = (max_x - y_px) * resolution + origin[1]
 
             f.write(f"{x}\t{y}\t{trajectory.velocity_profile[i]}\n")
 

@@ -1,3 +1,8 @@
+import os
+import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 #uses https://github.com/AtsushiSakai/pycubicspline
 import pycubicspline.pycubicspline as pyspline
 from trajectory import Trajectory
@@ -235,7 +240,7 @@ def main():
     desired_points_per_meter    = 0.4   #how many control points to use during optimization per spline (you want as few as possible!)
     max_change_per_point_meters = 0.15   #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
 
-    num_epochs                  = 40     #number of optimization epochs
+    num_epochs                  = 1     #number of optimization epochs
     num_keep                    = 3      #number of trajectories to keep after each epoch
     num_population              = 200    #population size during epoch
     num_changes_per_mutation    = 2      #number of controlpoint changes during a mutation
@@ -270,7 +275,7 @@ def main():
                                     num_changes_per_mutation=num_changes_per_mutation, 
                                     max_change_in_pixels=max_change_per_point_meters/opt.get_config()["resolution"])
 
-    raceline.safe_trajectory_to_file("my_map_raceline.csv", num_points=300)
+    raceline.safe_trajectory_to_file(opt.get_map(), "my_map_raceline.csv", num_points=300)
 
     raceline.laptime = None
     raceline.do_forwards_pass = True
