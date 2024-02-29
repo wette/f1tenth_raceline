@@ -289,7 +289,7 @@ class Trajectory:
 
             #transform pixel to coordinates - y axis needs to be swapped around!
             x = x_px * resolution + origin[0]
-            y = (max_x - y_px) * resolution + origin[1]
+            y = (max_x - y_px) * resolution + origin[1]   #TODO: Shouldn't this be max_y? Somewhere down the line x and y seem to be swapped by mistake!
 
             f.write(f"{x}\t{y}\t{trajectory.velocity_profile[i]}\n")
 

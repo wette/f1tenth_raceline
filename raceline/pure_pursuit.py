@@ -69,7 +69,7 @@ class PurePursuit(Node):
         self.map_frame_name     = "map"
         self.vehicle_frame_name = "ego_racecar/laser"
 
-        self.lookahead_m = 0.3          #lookahead to find out steering angle
+        self.lookahead_m = 0.5          #lookahead to find out steering angle
         self.index_on_raceline = 0      #where on the trajectory are we currently?
 
 
@@ -123,6 +123,8 @@ class PurePursuit(Node):
         x_vehicle_map = t.transform.translation.x
         y_vehicle_map = t.transform.translation.y
 
+        print(f"x_vehicle_map: {x_vehicle_map}, y_vehicle_map: {y_vehicle_map}")
+
         #find the point of the raceline where we currently are
         best_diff = 100000
         best_idx = self.index_on_raceline
@@ -135,13 +137,15 @@ class PurePursuit(Node):
             if len_diff < best_diff:
                 #found better point!
                 best_diff = len_diff
-                best_idx = i
+                best_idx = idx
                 found_better_point = True
             else:
                 if found_better_point:
                     #last time we found a better point - this time not:
                     # we can end the search as from now on, we will be moving away from the best point
                     break
+                
+        print(f"closest point: {best_idx}")
 
         #find the required steering angle
         #find next point on trajectory which is self.lookahead awy from current position of vehicle
@@ -156,7 +160,7 @@ class PurePursuit(Node):
             if len_diff < best_diff:
                 #found better point!
                 best_diff = len_diff
-                best_next_idx = i
+                best_next_idx = idx
                 found_better_point = True
             else:
                 if found_better_point:
@@ -174,7 +178,7 @@ class PurePursuit(Node):
         x += t.transform.translation.x
         y += t.transform.translation.y
 
-        #DEBUG: publish point
+        #DEBUG: publish closest point
         m = Marker()
         m.header.frame_id = self.vehicle_frame_name
         m.header.stamp = self.get_clock().now().to_msg()
@@ -194,6 +198,39 @@ class PurePursuit(Node):
         m.scale.z = 0.5
         m.color.r = 1.0
         m.color.g = 1.0
+        m.color.b = 1.0
+        m.color.a = 1.0
+        self.publisher_marker_viz.publish(m)
+
+        x = self.raceline.x[best_idx]
+        y = self.raceline.y[best_idx]
+        
+        t = self.tf_buffer.lookup_transform(self.vehicle_frame_name,
+                                    self.map_frame_name,
+                                    rclpy.time.Time())
+        x += t.transform.translation.x
+        y += t.transform.translation.y
+
+        #publish target point
+        m = Marker()
+        m.header.frame_id = self.vehicle_frame_name
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.ns = "debug_raceline"
+        m.id = 132479
+        m.type = Marker.SPHERE
+        m.action = Marker.ADD
+        m.pose.position.x = x
+        m.pose.position.y = y
+        m.pose.position.z = 0.0
+        m.pose.orientation.x = 0.0
+        m.pose.orientation.y = 0.0
+        m.pose.orientation.z = 0.0
+        m.pose.orientation.w = 0.0
+        m.scale.x = 0.5
+        m.scale.y = 0.5
+        m.scale.z = 0.5
+        m.color.r = 0.0
+        m.color.g = 0.0
         m.color.b = 1.0
         m.color.a = 1.0
         self.publisher_marker_viz.publish(m)
