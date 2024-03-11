@@ -15,6 +15,7 @@ from pid_controller import PIDController
 
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros.buffer import Buffer
+import tf2_geometry_msgs #import required to compute transform!
 
 
 
@@ -41,7 +42,7 @@ class PurePursuit(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         #parameters to filter the steering signal before its given to the VESC
-        self.pid = PIDController(kp = 0.3, ki = 0.0, kd = 0.1)
+        self.pid = PIDController(kp = 1.5, ki = 0.0, kd = 0.1)
 
         #dimensions of the vehicle
         self.vehicle_width_meters           = 0.4
@@ -54,17 +55,17 @@ class PurePursuit(Node):
         self.raceline.load_trajectory_from_file("/home/wette/wette_racecar_ws/src/raceline/raceline/my_map_raceline.csv")
 
         self.map_frame_name     = "map"
-        self.vehicle_frame_name = "ego_racecar/laser"
+        self.vehicle_frame_name = "ego_racecar/base_link"
 
-        self.lookahead_m = 0.5          #lookahead to find out steering angle
+        self.lookahead_m = 1.0          #lookahead to find out steering angle
         self.speed_factor = 0.5         #how much of the speed do we want to apply?
-        self.speed_min = 0.5            #minimum speed
-        self.speed_max = 10.0           #maximum speed
+        self.speed_min = 0.1            #minimum speed
+        self.speed_max = 0.2            #maximum speed
         self.index_on_raceline = 0      #where on the trajectory are we currently?
 
 
         self.create_timer(1.0, self.debug_publish_raceline)
-        self.create_timer(0.2, self.dodrive)
+        self.create_timer(1.0/50.0, self.dodrive)
 
     def debug_publish_raceline(self):
         minvel = min(self.raceline.velocity_profile)
@@ -90,7 +91,7 @@ class PurePursuit(Node):
             m.scale.y = 0.2
             m.scale.z = 0.2
             m.color.r = (self.raceline.velocity_profile[i]-minvel)*color_scale
-            m.color.g = (1-(self.raceline.velocity_profile[i]-minvel))*color_scale
+            m.color.g = 1.0-m.color.r
             m.color.b = 0.0
             m.color.a = 1.0
 
@@ -113,7 +114,7 @@ class PurePursuit(Node):
         x_vehicle_map = t.transform.translation.x
         y_vehicle_map = t.transform.translation.y
 
-        print(f"x_vehicle_map: {x_vehicle_map}, y_vehicle_map: {y_vehicle_map}")
+        #print(f"x_vehicle_map: {x_vehicle_map}, y_vehicle_map: {y_vehicle_map}")
 
         #find the point of the raceline where we currently are
         best_diff = 100000
@@ -135,7 +136,7 @@ class PurePursuit(Node):
                     # we can end the search as from now on, we will be moving away from the best point
                     break
                 
-        print(f"closest point: {best_idx}")
+        #print(f"closest point: {best_idx}")
 
         #find the required steering angle
         #find next point on trajectory which is self.lookahead awy from current position of vehicle
@@ -159,8 +160,8 @@ class PurePursuit(Node):
                     break
 
         #found the points in map coordinate system. need to transfer back to vehicle coordinate system
-        x = self.raceline.x[best_next_idx]
-        y = self.raceline.y[best_next_idx]
+        x = self.raceline.x[best_idx]
+        y = self.raceline.y[best_idx]
         
         t = self.tf_buffer.lookup_transform(self.vehicle_frame_name,
                                     self.map_frame_name,
@@ -192,14 +193,26 @@ class PurePursuit(Node):
         m.color.a = 1.0
         self.publisher_marker_viz.publish(m)
 
-        x = self.raceline.x[best_idx]
-        y = self.raceline.y[best_idx]
+        x = self.raceline.x[best_next_idx]
+        y = self.raceline.y[best_next_idx]
         
-        t = self.tf_buffer.lookup_transform(self.vehicle_frame_name,
-                                    self.map_frame_name,
-                                    rclpy.time.Time())
-        x += t.transform.translation.x
-        y += t.transform.translation.y
+        #t = self.tf_buffer.lookup_transform(self.vehicle_frame_name,
+        #                            self.map_frame_name,
+        #                            rclpy.time.Time())
+        #x += t.transform.translation.x
+        #y += t.transform.translation.y
+#
+        #print(f"map to vehicle transform: {t.transform.translation.x}, {t.transform.translation.y}", flush=True)
+
+        point_in_map = PoseStamped()
+        point_in_map.pose.position.x = x
+        point_in_map.pose.position.y = y
+        point_in_map.header.frame_id = self.map_frame_name
+        point_in_map.header.stamp = rclpy.time.Time().to_msg() #get the newest transform
+        point_in_vehicle = self.tf_buffer.transform(point_in_map, self.vehicle_frame_name)
+        
+        x = point_in_vehicle.pose.position.x
+        y = point_in_vehicle.pose.position.y
 
         #publish target point
         m = Marker()
@@ -226,9 +239,18 @@ class PurePursuit(Node):
         self.publisher_marker_viz.publish(m)
 
         #compute angle to target_point (x,y) (already in vehicle frame)
-        b = y
-        c = math.sqrt(x*x* + y*y)
-        alpha = math.acos(b/c) #in rad
+        b = x
+        c = math.sqrt(x*x + y*y)
+        alpha = 0.0
+        if c != 0.0:
+            alpha = math.acos(b/c) #in rad
+
+        #check if we need to steer left or right.
+        if y < 0:
+            alpha *= -1.0
+
+
+        #print(f"point: {x}, {y} - b = {b}, c = {c}, alpha = {alpha}", flush=True)
         
         #use PID filter for steering signal
         alpha = self.pid.update(alpha)
