@@ -36,22 +36,9 @@ class PurePursuit(Node):
         self.publisher_markerarray_viz  = self.create_publisher(MarkerArray, TOPIC_DEBUG_MARKERARRAY, 10)
         self.publisher_marker_viz       = self.create_publisher(Marker, TOPIC_DEBUG_MARKER, 10)
 
-        #create listeners
-        #self.sub_laser = self.create_subscription(LaserScan, TOPIC_LASERSCAN, self.cb_new_laserscan, 10)
-        #self.sub_laser  # prevent unused variable warning
-        #self.sub_odom  = self.create_subscription(Odometry, TOPIC_ODOMETRY, self.cb_new_odometry, 10)
-        #self.sub_odom  # prevent unused variable warning
-
         #receive transformations
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-
-        #status of the vehicle
-        self.speed_meters_per_sec       = [0,0,0]   #current velocity of the vehicle
-        self.filtered_free_space_ahead  = 0.0       #how much free space is currently in front of the vehicle?
-        self.in_emergency_stop          = False
-        self.last_steering_angle        = 0         #steering angle of last epoch
-        self.time_last_laserscan        = None
 
         #parameters to filter the steering signal before its given to the VESC
         self.pid = PIDController(kp = 0.3, ki = 0.0, kd = 0.1)
@@ -70,6 +57,9 @@ class PurePursuit(Node):
         self.vehicle_frame_name = "ego_racecar/laser"
 
         self.lookahead_m = 0.5          #lookahead to find out steering angle
+        self.speed_factor = 0.5         #how much of the speed do we want to apply?
+        self.speed_min = 0.5            #minimum speed
+        self.speed_max = 10.0           #maximum speed
         self.index_on_raceline = 0      #where on the trajectory are we currently?
 
 
@@ -235,17 +225,30 @@ class PurePursuit(Node):
         m.color.a = 1.0
         self.publisher_marker_viz.publish(m)
 
-        #TODO: compute angle to target_point
+        #compute angle to target_point (x,y) (already in vehicle frame)
+        b = y
+        c = math.sqrt(x*x* + y*y)
+        alpha = math.acos(b/c) #in rad
         
+        #use PID filter for steering signal
+        alpha = self.pid.update(alpha)
 
         #find the required speed
-        speed = self.raceline.velocity_profile[best_idx]
+        speed = self.raceline.velocity_profile[best_idx] * self.speed_factor
+
+        #make sure speed is between fixed min and max values
+        speed = max(self.speed_min, min(speed, self.speed_max))
 
         #write to VESC
+        drive_msg = AckermannDriveStamped()
+        drive_msg.header.frame_id = self.vehicle_frame_name
+        drive_msg.header.stamp = self.get_clock().now().to_msg()
+        drive_msg.drive.steering_angle = float(alpha)
+        drive_msg.drive.speed = float(speed)
+        self.publisher_ackermann.publish(drive_msg)
                 
         #variable contents for next iteration
         self.index_on_raceline = best_idx
-
 
 
     #destructor
