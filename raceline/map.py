@@ -12,7 +12,7 @@ class Map:
         self.__resolution = resolution
 
         self.binarize_image()
-        self.region_growing()
+        #self.region_growing()
 
     def get_origin(self):
         return self.__origin
@@ -64,7 +64,10 @@ class Map:
         pgmf = open(image_file, "r", encoding="latin-1")
         firstline = pgmf.readline()
         assert firstline == 'P5\n'
-        (width, height) = [int(i) for i in pgmf.readline().split()]
+        nextline = pgmf.readline()
+        while nextline.startswith("#"):
+            nextline = pgmf.readline()
+        (width, height) = [int(i) for i in nextline.split()]
         depth = int(pgmf.readline())
         assert depth <= 255
 
@@ -78,7 +81,7 @@ class Map:
     
     def binarize_image(self):
         """use the thresholds to create a 0/1 image showing freespace as 0"""
-        threshold_free = 220
+        threshold_free = 130 #220
         for x in range(0, len(self.__map)):
             for y in range(0, len(self.__map[0])):
                 if self.__map[x][y] >= threshold_free:
