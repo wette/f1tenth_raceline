@@ -267,6 +267,7 @@ class PurePursuit(Node):
 
         #compute angle to target_point (x,y) (already in vehicle frame)
         b = x
+<<<<<<< Updated upstream
         c = math.sqrt(x*x + y*y)
         alpha = 0.0
         if c != 0.0:
@@ -279,6 +280,11 @@ class PurePursuit(Node):
 
         #print(f"point: {x}, {y} - b = {b}, c = {c}, alpha = {alpha}", flush=True)
         
+=======
+        c = math.sqrt(x*x* + y*y)
+        alpha = math.acos(b/c) #in rad
+>>>>>>> Stashed changes
+
         #use PID filter for steering signal
         alpha = self.pid.update(alpha)
 
