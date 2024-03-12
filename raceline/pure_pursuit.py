@@ -42,7 +42,7 @@ class PurePursuit(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         #parameters to filter the steering signal before its given to the VESC
-        self.pid = PIDController(kp = 1.5, ki = 0.0, kd = 0.1)
+        self.pid = PIDController(kp = 1.0, ki = 0.0, kd = 0.0)
 
         #dimensions of the vehicle
         self.vehicle_width_meters           = 0.4
@@ -57,11 +57,13 @@ class PurePursuit(Node):
         self.map_frame_name     = "map"
         self.vehicle_frame_name = "ego_racecar/base_link"
 
-        self.lookahead_m = 1.0          #lookahead to find out steering angle
+        self.lookahead_m = 0.5          #lookahead to find out steering angle
         self.speed_factor = 0.5         #how much of the speed do we want to apply?
         self.speed_min = 0.1            #minimum speed
-        self.speed_max = 0.2            #maximum speed
-        self.index_on_raceline = 0      #where on the trajectory are we currently?
+        self.speed_max = 9.0            #maximum speed
+        self.index_on_raceline = -1      #where on the trajectory are we currently?
+
+        self.last_steering_angle_rad = 0.0
 
 
         self.create_timer(1.0, self.debug_publish_raceline)
@@ -105,6 +107,34 @@ class PurePursuit(Node):
         except Exception as e:
             print(e)
 
+    def transformPoint(self, x:float, y:float, from_frame: str, target_frame:str) -> (float, float):
+        point_in_map = PoseStamped()
+        point_in_map.pose.position.x = x
+        point_in_map.pose.position.y = y
+        point_in_map.header.frame_id = from_frame
+        point_in_map.header.stamp = rclpy.time.Time().to_msg() #get the newest transform
+        point_in_vehicle = self.tf_buffer.transform(point_in_map, target_frame)
+        
+        x = point_in_vehicle.pose.position.x
+        y = point_in_vehicle.pose.position.y
+
+        return x,y
+
+    def dynamic_lookahead(self):
+        if abs(self.last_steering_angle_rad) < math.radians(2.0):
+            return self.lookahead_m * 4.0
+        
+        if abs(self.last_steering_angle_rad) < math.radians(5.0):
+            return self.lookahead_m * 2.0
+        
+        if abs(self.last_steering_angle_rad) < math.radians(10.0):
+            return self.lookahead_m * 1.5
+        
+        if abs(self.last_steering_angle_rad) < math.radians(20.0):
+            return self.lookahead_m * 1.0
+        
+        return self.lookahead_m
+
     def drive(self):
         #find out where we currently are in the map
         t = self.tf_buffer.lookup_transform(
@@ -113,6 +143,15 @@ class PurePursuit(Node):
                                     rclpy.time.Time())
         x_vehicle_map = t.transform.translation.x
         y_vehicle_map = t.transform.translation.y
+
+        #check if we have lost tracking of the raceline
+        if self.index_on_raceline > 0:
+            diff_x = self.raceline.x[self.index_on_raceline]-x_vehicle_map
+            diff_y = self.raceline.y[self.index_on_raceline]-y_vehicle_map
+            len_diff = math.sqrt(diff_x*diff_x+diff_y*diff_y)
+
+            if len_diff > 2.0:
+                self.index_on_raceline = -1
 
         #print(f"x_vehicle_map: {x_vehicle_map}, y_vehicle_map: {y_vehicle_map}")
 
@@ -131,12 +170,18 @@ class PurePursuit(Node):
                 best_idx = idx
                 found_better_point = True
             else:
-                if found_better_point:
+                if self.index_on_raceline > -1 and found_better_point:
                     #last time we found a better point - this time not:
                     # we can end the search as from now on, we will be moving away from the best point
                     break
-                
+        
+        current_distance_from_raceline = best_diff
+
         #print(f"closest point: {best_idx}")
+                
+        #lookahead distance should be adaptable to current conditions
+        #in curves, it should be smaller, on straights it should be larger
+        lookahead = self.dynamic_lookahead()
 
         #find the required steering angle
         #find next point on trajectory which is self.lookahead awy from current position of vehicle
@@ -147,7 +192,7 @@ class PurePursuit(Node):
             idx = (best_idx + i) % len(self.raceline.x)
             diff_x = self.raceline.x[idx]-x_vehicle_map
             diff_y = self.raceline.y[idx]-y_vehicle_map
-            len_diff = abs(self.lookahead_m - math.sqrt(diff_x*diff_x+diff_y*diff_y))
+            len_diff = abs(lookahead - math.sqrt(diff_x*diff_x+diff_y*diff_y))
             if len_diff < best_diff:
                 #found better point!
                 best_diff = len_diff
@@ -162,12 +207,8 @@ class PurePursuit(Node):
         #found the points in map coordinate system. need to transfer back to vehicle coordinate system
         x = self.raceline.x[best_idx]
         y = self.raceline.y[best_idx]
-        
-        t = self.tf_buffer.lookup_transform(self.vehicle_frame_name,
-                                    self.map_frame_name,
-                                    rclpy.time.Time())
-        x += t.transform.translation.x
-        y += t.transform.translation.y
+
+        x, y = self.transformPoint(x, y, self.map_frame_name, self.vehicle_frame_name)
 
         #DEBUG: publish closest point
         m = Marker()
@@ -195,24 +236,10 @@ class PurePursuit(Node):
 
         x = self.raceline.x[best_next_idx]
         y = self.raceline.y[best_next_idx]
-        
-        #t = self.tf_buffer.lookup_transform(self.vehicle_frame_name,
-        #                            self.map_frame_name,
-        #                            rclpy.time.Time())
-        #x += t.transform.translation.x
-        #y += t.transform.translation.y
-#
-        #print(f"map to vehicle transform: {t.transform.translation.x}, {t.transform.translation.y}", flush=True)
 
-        point_in_map = PoseStamped()
-        point_in_map.pose.position.x = x
-        point_in_map.pose.position.y = y
-        point_in_map.header.frame_id = self.map_frame_name
-        point_in_map.header.stamp = rclpy.time.Time().to_msg() #get the newest transform
-        point_in_vehicle = self.tf_buffer.transform(point_in_map, self.vehicle_frame_name)
-        
-        x = point_in_vehicle.pose.position.x
-        y = point_in_vehicle.pose.position.y
+        #transform fram map to vehicle coordinate system        
+        x, y = self.transformPoint(x, y, self.map_frame_name, self.vehicle_frame_name)
+
 
         #publish target point
         m = Marker()
@@ -261,6 +288,9 @@ class PurePursuit(Node):
         #make sure speed is between fixed min and max values
         speed = max(self.speed_min, min(speed, self.speed_max))
 
+        if current_distance_from_raceline > 0.2:
+            speed *= 0.3
+
         #write to VESC
         drive_msg = AckermannDriveStamped()
         drive_msg.header.frame_id = self.vehicle_frame_name
@@ -271,6 +301,7 @@ class PurePursuit(Node):
                 
         #variable contents for next iteration
         self.index_on_raceline = best_idx
+        self.last_steering_angle_rad = alpha
 
 
     #destructor
