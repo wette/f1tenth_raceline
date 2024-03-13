@@ -336,12 +336,14 @@ class Trajectory:
         self.x = []
         self.y = []
         self.velocity_profile = []
+        self.curvature = []
 
         for line in f.readlines():
             tokens = line.split("\t")
             self.x.append(float(tokens[0]))
             self.y.append(float(tokens[1]))
             self.velocity_profile.append(float(tokens[2]))
+            self.curvature.append(float(tokens[3]))
 
         f.close()
 
