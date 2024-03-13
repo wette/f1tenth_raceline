@@ -46,7 +46,7 @@ class PurePursuit(Node):
 
         #dimensions of the vehicle
         self.vehicle_width_meters           = 0.4
-        self.vehicle_max_steering_angle_deg = 60
+
 
         #raceline
         #TODO: Trajectroy constructor w/o arguments...
@@ -57,10 +57,12 @@ class PurePursuit(Node):
         self.map_frame_name     = "map"
         self.vehicle_frame_name = "ego_racecar/base_link"
 
-        self.lookahead_m = 0.5          #lookahead to find out steering angle
-        self.speed_factor = 0.5         #how much of the speed do we want to apply?
-        self.speed_min = 0.1            #minimum speed
-        self.speed_max = 9.0            #maximum speed
+        self.max_raceline_speed = max(self.raceline.velocity_profile)
+
+        self.lookahead_m = 0.4           #lookahead to find out steering angle
+        self.speed_factor = 0.7          #how much of the speed do we want to apply?
+        self.speed_min = 0.1             #minimum speed
+        self.speed_max = 9.0             #maximum speed
         self.index_on_raceline = -1      #where on the trajectory are we currently?
 
         self.last_steering_angle_rad = 0.0
@@ -120,20 +122,9 @@ class PurePursuit(Node):
 
         return x,y
 
-    def dynamic_lookahead(self):
-        if abs(self.last_steering_angle_rad) < math.radians(2.0):
-            return self.lookahead_m * 4.0
-        
-        if abs(self.last_steering_angle_rad) < math.radians(5.0):
-            return self.lookahead_m * 2.0
-        
-        if abs(self.last_steering_angle_rad) < math.radians(10.0):
-            return self.lookahead_m * 1.5
-        
-        if abs(self.last_steering_angle_rad) < math.radians(20.0):
-            return self.lookahead_m * 1.0
-        
-        return self.lookahead_m
+    def dynamic_lookahead(self, raceline_index):
+        factor = self.raceline.velocity_profile[raceline_index] / self.max_raceline_speed
+        return( max(self.lookahead_m, 5.0*factor*factor*self.lookahead_m) )
 
     def drive(self):
         #find out where we currently are in the map
@@ -181,7 +172,7 @@ class PurePursuit(Node):
                 
         #lookahead distance should be adaptable to current conditions
         #in curves, it should be smaller, on straights it should be larger
-        lookahead = self.dynamic_lookahead()
+        lookahead = self.dynamic_lookahead(best_idx)
 
         #find the required steering angle
         #find next point on trajectory which is self.lookahead awy from current position of vehicle
