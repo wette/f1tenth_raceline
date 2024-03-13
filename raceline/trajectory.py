@@ -185,7 +185,7 @@ class Trajectory:
     
     def get_laptime(self) -> int:
         if self.laptime is not None:
-            return self.laptime
+            return self.laptime * self.resolution
         
         self.compute_velocity_profile()
         #compute length of spline and divide by velocity --> time
@@ -312,9 +312,9 @@ class Trajectory:
         origin = map.get_origin()
 
         #debug: show trajectory:
-        pyplot.scatter(trajectory.x,trajectory.y, c=trajectory.velocity_profile[0:len(trajectory.x)], linewidth=1, cmap=pyplot.cm.coolwarm)
-        pyplot.colorbar()
-        pyplot.show()
+        #pyplot.scatter(trajectory.x,trajectory.y, c=trajectory.velocity_profile[0:len(trajectory.x)], linewidth=1, cmap=pyplot.cm.coolwarm)
+        #pyplot.colorbar()
+        #pyplot.show()
 
 
         for i in range(len(trajectory.x)):
@@ -325,7 +325,7 @@ class Trajectory:
             x = x_px * resolution + origin[0]
             y = (max_x - y_px) * resolution + origin[1]   #TODO: Shouldn't this be max_y? Somewhere down the line x and y seem to be swapped by mistake!
 
-            f.write(f"{x}\t{y}\t{trajectory.velocity_profile[i]}\n")
+            f.write(f"{x}\t{y}\t{trajectory.velocity_profile[i]}\t{trajectory.curvature[i]}\n")
 
         f.close()
 
