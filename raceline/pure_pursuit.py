@@ -60,7 +60,7 @@ class PurePursuit(Node):
 
         self.max_raceline_speed = max(self.raceline.velocity_profile)
 
-        self.lookahead_m = 0.4           #lookahead to find out steering angle
+        self.lookahead_m = 0.6           #lookahead to find out steering angle
         self.speed_factor = 0.7          #how much of the speed do we want to apply?
         self.speed_min = 0.1             #minimum speed
         self.speed_max = 9.0             #maximum speed
@@ -70,7 +70,7 @@ class PurePursuit(Node):
 
 
         self.create_timer(1.0, self.debug_publish_raceline)
-        self.create_timer(1.0/50.0, self.dodrive)
+        self.create_timer(1.0/20.0, self.dodrive)
 
     def debug_publish_raceline(self):
         minvel = min(self.raceline.velocity_profile)
