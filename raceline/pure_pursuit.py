@@ -10,7 +10,7 @@ from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from geometry_msgs.msg import PoseStamped
 
-from trajectory import Trajectory
+from trajectory import Trajectory, VehicleDescription
 from pid_controller import PIDController
 
 from tf2_ros.transform_listener import TransformListener
@@ -50,7 +50,8 @@ class PurePursuit(Node):
 
         #raceline
         #TODO: Trajectroy constructor w/o arguments...
-        self.raceline = Trajectory(x=[0, 1], y=[0, 1], haftreibung=0, vehicle_width_m=0, vehicle_acceleration_mss=0, vehicle_deceleration_mss=0, resolution=0)
+        vd = VehicleDescription(haftreibung=0.0, vehicle_width_m=0.0, vehicle_acceleration_mss=0.0, vehicle_deceleration_mss=0.0)
+        self.raceline = Trajectory(x=[0, 1, 2], y=[0, 1, 2], vehicle_description=vd, resolution=0)
         #TODO: file path from configuration or command line
         self.raceline.load_trajectory_from_file("/home/wette/wette_racecar_ws/src/raceline/raceline/my_map_raceline.csv")
 
