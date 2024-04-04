@@ -14,13 +14,6 @@ import math
 from matplotlib import pyplot 
 import random
 
-#x = np.linspace(0, 10, num=11)
-#y = np.cos(-x**2 / 9.)
-#spl = CubicSpline(x, y)
-
-#karte holen.
-# scp "192.168.64.5:/home/wette/cartographer_ws/my_map*" .
-
 class RacelineOptimizer:
     def __init__(self, configfile: str):
         self.__config = None
@@ -33,7 +26,7 @@ class RacelineOptimizer:
     def get_map(self) -> Map:
         return self.__map
 
-    def get_config(self):
+    def get_config(self) -> dict:
         return self.__config
 
     def debug_draw_map(self):
@@ -43,23 +36,16 @@ class RacelineOptimizer:
     def debug_draw_trajectory(self, trajectory : Trajectory, filename: str = None):
         pyplot.imshow(self.__map.get_pixel_map())
 
-        #add the second point of the spine as last, too -> nicer circle
-        xs = trajectory.x[:]
-        #xs.append(trajectory.x[1])
-        ys = trajectory.y[:]
-        #ys.append(trajectory.y[1])
-        lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(xs, ys, num=300)
+        lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x, trajectory.y, num=300)
 
         rl = Trajectory(lx, ly, trajectory.get_vehicle_description(), trajectory.resolution)
         rl.do_forwards_pass = True
         rl.compute_velocity_profile()
         print(f"Raceline with 300 points time: {rl.get_laptime()}")
 
-        #pyplot.scatter(rl.x,rl.y, c=rl.velocity_profile, linewidth=1, cmap=pyplot.cm.coolwarm)
-        pyplot.scatter(rl.x,rl.y, c=rl.curvature, linewidth=1, cmap=pyplot.cm.coolwarm)
+        pyplot.scatter(rl.x,rl.y, c=rl.velocity_profile, linewidth=1, cmap=pyplot.cm.coolwarm)
         pyplot.colorbar()
-        #pyplot.plot(lx,ly)
-        #pyplot.scatter(trajectory.x, trajectory.y, marker="x")
+        
         try:
             if filename is not None:
                 pyplot.savefig(filename)
@@ -67,11 +53,14 @@ class RacelineOptimizer:
             else:
                 pyplot.show()
         except:
-            print(f"could not save image in file {filename}")
+            print(f"could not save image to file {filename}")
 
         
 
-    def get_manual_initial_centerline(self, num_control_points = 200) -> (int, int):
+    def get_manual_initial_centerline(self, num_control_points = 200) -> tuple[int, int]:
+        """
+            Let the user define the initial centerline for optimization by clicking with a mouse.
+        """
         print("#####################")
         print("#### click in the image to give manual controlpoints to a spline")
         print("#####################")
@@ -92,7 +81,7 @@ class RacelineOptimizer:
 
         #remove all points which are not within free space
         for p in points[:]:
-            if self.__map[p[0]][p[1]] > 0.0:
+            if self.__map[p[1]][p[0]] > 0.0:
                 points.remove(p)
 
         xs = [p[0] for p in points]
@@ -109,7 +98,6 @@ class RacelineOptimizer:
         x, y, yaw, k, travel = pyspline.calc_2d_spline_interpolation(xs, ys, num=num_control_points)
         
         print(f"Initial Lap Length [m]: {max(travel) * self.__config['resolution']}")
-
 
         return x, y
 
@@ -178,10 +166,6 @@ class RacelineOptimizer:
             vehicle_width_in_map_pixels = math.ceil(population[0].vehicle_width_m / self.__config['resolution'])
             for l in population[:]:
                 lx,ly, _, curvature, _ = pyspline.calc_2d_spline_interpolation(l.x, l.y, num=500)
-                #connect first with last point of the spline
-                #x2,y2,_,_,_    = pyspline.calc_2d_spline_interpolation([l.x[-1], l.x[0]], [l.y[-1], l.y[0]], num=30)
-                #lx +=x2
-                #ly +=y2
 
                 #check curvature:
                 curvature_ok = True
@@ -235,35 +219,12 @@ class RacelineOptimizer:
         return population[-1]
     
 
-    def test(self, t: Trajectory):
-        self.debug_draw_trajectory(t)
-        idx = 0
-        x = t.x[idx]
-        y = t.y[idx]
-        #test different changes - keep the first one which is in free space
-        normalx, normaly = t.compute_normal_vector(idx)
-        change = 10
-
-        t.x[idx] = x + change*normalx
-        t.y[idx] = y + change*normaly
-        #if first point is moved, last point needs to move, too!
-        if idx == 0:
-            t.x[len(t.x)-1] = t.x[idx]
-            t.y[len(t.y)-1] = t.y[idx]
-                
-        #apply spline smoothing
-        t.x, t.y, _, t.curvature, _ = pyspline.calc_2d_spline_interpolation(t.x, t.y, num=len(t.y))
-        t.length = None
-        t.laptime = None
-
-        self.debug_draw_trajectory(t)
-
 def main():
     haftreibung                 = 0.05
-    vehicle_width_m             = 0.5      #half width is minimum distance to any wall at any time
+    vehicle_width_m             = 0.6      #half width is minimum distance to any wall at any time
     vehicle_acceleration_mss    = 10.0     #vehicle acceleration in meters/sec/sec
-    vehicle_deceleration_mss    = 15.0     #vehicle deceleration in meters/sec/sec
-    turning_radius_m            = 2.0      #turning radius of the vehicle in meters
+    vehicle_deceleration_mss    = 5.0     #vehicle deceleration in meters/sec/sec
+    turning_radius_m            = 1.4      #turning radius of the vehicle in meters
 
     desired_points_per_meter    = 1.0      #how many control points to use during optimization per spline (you want as few as possible!)
     max_change_per_point_meters = 0.2      #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
@@ -271,9 +232,9 @@ def main():
     num_epochs                  = 100       #number of optimization epochs
     num_keep                    = 100      #number of trajectories to keep after each epoch
     num_population              = 1000     #population size during epoch
-    num_changes_per_mutation    = 5        #number of controlpoint changes during a mutation
+    num_changes_per_mutation    = 2#5        #number of controlpoint changes during a mutation
 
-    opt = RacelineOptimizer("/Users/wette/Documents/FHBielefeld/eigeneVorlesungen/F110/repositories/wette_racecar_ws/src/raceline/raceline/mindenCitySpeedway.yaml")
+    opt = RacelineOptimizer("/tmp/mindenCItySpeedway.yaml")
     
     #for development: fixed start trajectory - in production this should come from waypoints sampled from follow the gap algorithm.
     #x,y = opt.get_manual_initial_centerline()
@@ -281,8 +242,10 @@ def main():
     #y = [389.0, 388.95837465065927, 388.9380717882851, 388.9604138998441, 389.04633266907257, 389.2042567928682, 389.4277774814041, 389.70962394818457, 390.0425254067138, 390.4192110704959, 390.83241015303497, 391.27485186783514, 391.7392654284006, 392.2183800482355, 392.7049249408439, 393.19164879903684, 393.6720820981652, 394.14078529680665, 394.5923891589787, 395.0215244486984, 395.42282192998346, 395.79091236685116, 396.1204265233188, 396.405995163404, 396.642249051124, 396.8238189504962, 396.945335625538, 397.0014315953824, 396.99628717243894, 396.96597819742396, 396.953232910475, 397.00077954653375, 397.1427284390548, 397.3795881659319, 397.70367886866495, 398.1073206887542, 398.58283376769975, 399.12253824700167, 399.7187542681602, 400.3638019726754, 401.05000021706473, 401.76528397402296, 402.48340682706254, 403.1752600152036, 403.8117347774661, 404.3637223528702, 404.80211398043593, 405.09747928103764, 405.2074846118021, 405.072799170917, 404.63293221930695, 403.8275440124881, 402.63960377883524, 401.1549539509986, 399.47437873033175, 397.69834462298667, 395.8224363776085, 393.5863843106096, 390.69163903456274, 386.83965627242867, 381.8499979955713, 375.96586992628556, 369.52542948366647, 362.86683408680915, 356.290539573853, 349.87312164509586, 343.6088388606242, 337.4918225668334, 331.51620411011857, 325.676114836875, 319.962043487329, 314.3280061506505, 308.7070063974404, 303.0317951336297, 297.23512326514896, 291.2566761421856, 285.13127541183144, 278.9628046367121, 272.85669832987963, 266.8927347053684, 261.05511095109824, 255.3057707110443, 249.6066576291817, 243.93684940744285, 238.44194817225477, 233.36127602755718, 228.93520227455016, 225.37882317131513, 222.69499868737358, 220.7805030062599, 219.531324525617, 218.8434516430879, 218.6128727563156, 218.735576262943, 219.10755056061313, 219.62478404696898, 220.1832651196535, 220.67898217630963, 221.0079247483257, 221.09160822997305, 220.9430183259799, 220.59562173531586, 220.08288515695048, 219.43827528985338, 218.69525883299414, 217.88730248534233, 217.0478729458675, 216.21043691353935, 215.40846108732737, 214.67417597993867, 214.00476374369714, 213.35823348562488, 212.69052998701096, 211.95760039507408, 211.13247339717665, 210.24621847394673, 209.3422212794792, 208.46434545889846, 207.6631588211553, 206.99417011286764, 206.5130030989689, 206.27528154439256, 206.33662921407188, 206.75266987294034, 207.57230347219976, 208.7581812415327, 210.21321402957517, 211.839115687498, 213.53673258971818, 215.14745813285103, 216.41600337668243, 217.07820963689298, 216.87093494141655, 215.71666745901655, 213.93825410144117, 211.91063580018505, 210.00875348674276, 208.602707174047, 207.7787303693363, 207.18681070221479, 206.43984384612298, 205.15072547450137, 203.33373061578047, 202.7846878743738, 203.18335484978923, 203.52219349288978, 203.762205648063, 203.9210494888459, 204.01648746935845, 204.0837481586039, 204.19496464986756, 204.42695838531614, 204.85655080711635, 205.56056335743492, 206.61717724061637, 208.13092598756867, 210.2302202904324, 213.04433406024353, 216.70224438039645, 221.24284231295084, 226.48869323468566, 232.23055841573841, 238.25919912624673, 244.3675571646277, 250.43964685345645, 256.4815711700896, 262.50798437099024, 268.5335407126211, 274.57289445144534, 280.6406998439261, 286.74901608249456, 292.88923172386535, 299.0428530761658, 305.1913249568186, 311.3160934634806, 317.4093455577694, 323.5000694994855, 329.62512893285714, 335.8213875021122, 342.12570885147886, 348.54788127990855, 354.93360041574175, 361.0670683822615, 366.7323789249238, 371.7316343707501, 376.01871118315444, 379.62357670711555, 382.5767682801498, 384.9163846381393, 386.73031190785986, 388.12657057357603, 389.21323771607985, 390.0983904161631, 390.8901057546178, 391.6687709226658, 392.34515918473227, 392.76584937423263, 392.7772995023768, 392.2259675803752, 390.95831422608046]
     
     #minden city speedway initial trajectory
-    x = [250.945302,241.169008,232.255328,222.191496,212.990278,202.063832,179.060787,148.869292,128.45409,111.201806,99.412746,97.975056,103.150741,119.54041,137.367769,160.083276,182.223706,198.038299,211.840126,214.715506,204.364136,187.111853,170.147108,152.607286,143.406068,142.543454,153.4699,164.971423,173.597564,177.910635,180.21094,181.936168,191.137386,205.514289,213.565354,210.402436,204.939213,198.613375,197.463223,205.801827,219.891191,238.868703,257.846215,274.81096,268.197585,259.571443]
-    y = [189.010582,208.275632,230.416062,251.981417,270.958928,296.837353,306.326109,299.137658,288.49875,276.70969,263.195401,242.205123,222.077459,208.275632,203.099947,205.975328,207.12548,202.524871,188.147968,169.170456,155.36863,153.930939,165.72,169.745532,160.831853,144.442184,129.777743,117.701144,103.61178,92.685333,76.295664,58.468305,45.529092,42.94125,52.142467,67.381984,81.183811,96.710866,112.525459,124.889596,130.640357,118.563758,114.825764,124.026982,147.89264,170.608147]
+    x = [258, 296, 312, 313, 311, 301, 281, 258, 239, 230, 221, 213, 197, 176, 163, 165, 177, 186, 185, 173, 155, 136, 118, 101, 80, 65, 55, 57, 74, 94, 113, 126, 129, 119, 105, 102, 106, 124, 147, 173, 199, 227]
+    y = [47, 52, 67, 94, 124, 154, 168, 169, 163, 143, 121, 100, 88, 87, 99, 117, 131, 144, 159, 165, 162, 157, 154, 153, 153, 152, 140, 126, 120, 120, 119, 111, 96, 81, 70, 57, 43, 38, 39, 42, 42, 44]
+    x = [258, 296, 312, 313, 311, 301, 281, 258, 239, 230, 221, 213, 197, 176, 163, 165, 177, 186, 185, 173, 155, 136, 118, 101, 80, 65, 55, 57, 74, 94, 113, 126, 129, 119, 105, 102, 106, 124, 147]
+    y = [47, 52, 67, 94, 124, 154, 168, 169, 163, 143, 121, 100, 88, 87, 99, 117, 131, 144, 159, 165, 162, 157, 154, 153, 153, 152, 140, 126, 120, 120, 119, 111, 96, 81, 70, 57, 43, 38, 39]
     #add the first point of the spine as last, too -> circle
     x.append(x[0])
     y.append(y[0])

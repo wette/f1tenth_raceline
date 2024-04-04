@@ -75,7 +75,10 @@ class Map:
         for y in range(height):
             row = []
             for x in range(width):
-                row.append(ord(pgmf.read(1)))
+                try:
+                    row.append(ord(pgmf.read(1)))
+                except:
+                    row.append(row[x-1]) #for some reason a byte is missing???
             raster.append(row)
         return raster
     

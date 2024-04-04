@@ -152,40 +152,11 @@ class Trajectory:
         self.length += math.sqrt( x2 + y2 )
 
         return self.length
-    
-    def get_laptime_old(self) -> int:
-        if self.laptime is not None:
-            return self.laptime
-        
-        #compute length of spline and divide by max. curvature speed --> time
-        self.laptime = 0.0
-        for i in range(0, len(self.x)-1):
-            x2 = self.x[i+1] - self.x[i]
-            x2 *= x2
-            y2 = self.y[i+1] - self.y[i]
-            y2 *= y2
 
-            length = math.sqrt( x2 + y2 )
-            max_speed = math.sqrt(self.haftreibung/(1.0-self.haftreibung) * 9.8 * abs(1.0/self.curvature[i]))
-            if max_speed < 0.0001:
-                continue
-            self.laptime += length/max_speed
-
-        #add length from last back to first.
-        x2 = self.x[-1] - self.x[0]
-        x2 *= x2
-        y2 = self.y[-1] - self.y[0]
-        y2 *= y2
-        
-        length = math.sqrt( x2 + y2 )
-        max_speed = math.sqrt(self.haftreibung/(1.0-self.haftreibung) * 9.8 * abs(1.0/self.curvature[i]))
-        self.laptime += length/max_speed
-
-        return self.laptime
     
     def get_laptime(self) -> int:
         if self.laptime is not None:
-            return self.laptime * self.resolution
+            return self.laptime
         
         self.compute_velocity_profile()
         #compute length of spline and divide by velocity --> time
@@ -205,7 +176,7 @@ class Trajectory:
         return self.laptime
 
 
-    def compute_normal_vector(self, idx: int):
+    def compute_normal_vector(self, idx: int) -> tuple[float, float]:
         """compute the normalized (orthogonal) normal vector for point with index idx"""
         prev_x = self.x[(idx-1) % len(self.x)]
         prev_y = self.y[(idx-1) % len(self.y)]
@@ -222,7 +193,7 @@ class Trajectory:
 
         return orto_dx/length, orto_dy/length
     
-    def compute_random_vector(self):
+    def compute_random_vector(self) -> tuple[float, float]:
         """compute a normalized random vector"""
         dx = 1.0-random.random()*2.0
         dy = 1.0-random.random()*2.0
@@ -257,7 +228,7 @@ class Trajectory:
                     self.y[idx] = y
 
             #propergate part of the changes to the surrounding controlpoints, too. to make sure we dont introduce kinks in the raceline
-            d = 2
+            d = random.randint(1,4) #2 #number of adjacent controlpoints which are moved, too
             for j in range(1,d+1):
                 self.x[(idx+j) % len(self.x)] += change*normalx * 1.0/(j+1)
                 self.y[(idx+j) % len(self.x)] += change*normaly * 1.0/(j+1)
@@ -311,12 +282,6 @@ class Trajectory:
         resolution = map.get_resolution()
         origin = map.get_origin()
 
-        #debug: show trajectory:
-        #pyplot.scatter(trajectory.x,trajectory.y, c=trajectory.velocity_profile[0:len(trajectory.x)], linewidth=1, cmap=pyplot.cm.coolwarm)
-        #pyplot.colorbar()
-        #pyplot.show()
-
-
         for i in range(len(trajectory.x)):
             x_px = trajectory.x[i]
             y_px = trajectory.y[i]
@@ -330,6 +295,7 @@ class Trajectory:
         f.close()
 
     def load_trajectory_from_file(self, file: str):
+        """ load precomputed trajectory from file """
         f = open(file, "r")
         f.readline() #ommit first line
 
