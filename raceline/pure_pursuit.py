@@ -8,10 +8,12 @@ from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 
 from trajectory import Trajectory, VehicleDescription
 from pid_controller import PIDController
+
+from laserscan_filter import LaserscanFilter
 
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros.buffer import Buffer
@@ -21,11 +23,12 @@ import tf2_geometry_msgs #import required to compute transform!
 
 import math
 
-TOPIC_DRIVE = "/drive"
+TOPIC_DRIVE = "/to_drive"
 TOPIC_LASERSCAN = "/scan"
-TOPIC_ODOMETRY = "/ego_racecar/odom"
+TOPIC_ODOMETRY = "/odom"
 TOPIC_DEBUG_MARKERARRAY = "/debug/raceline"
 TOPIC_DEBUG_MARKER = "/debug/marker"
+TOPIC_LOCALIZATION_COVARIANCE = "/amcl_pose"
 
 
 class PurePursuit(Node):
@@ -41,11 +44,18 @@ class PurePursuit(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
+        #create listeners
+        self.sub_laser = self.create_subscription(LaserScan, TOPIC_LASERSCAN, self.cb_new_laserscan, 1)
+        self.sub_laser  # prevent unused variable warning
+        self.sub_covariance = self.create_subscription(PoseWithCovarianceStamped, TOPIC_LOCALIZATION_COVARIANCE, self.cb_new_covariance, 1)
+        self.sub_covariance  # prevent unused variable warning
+
         #parameters to filter the steering signal before its given to the VESC
         self.pid = PIDController(kp = 1.0, ki = 0.0, kd = 0.0)
 
         #dimensions of the vehicle
-        self.vehicle_width_meters           = 0.4
+        self.vehicle_width_meters           = 0.28
+        self.vehicle_max_steering_angle_deg = 25
 
 
         #raceline
@@ -53,24 +63,31 @@ class PurePursuit(Node):
         vd = VehicleDescription(haftreibung=0.0, vehicle_width_m=0.0, vehicle_acceleration_mss=0.0, vehicle_deceleration_mss=0.0)
         self.raceline = Trajectory(x=[0, 1, 2], y=[0, 1, 2], vehicle_description=vd, resolution=0)
         #TODO: file path from configuration or command line
-        self.raceline.load_trajectory_from_file("/home/wette/wette_racecar_ws/src/raceline/raceline/my_map_raceline.csv")
+        self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/my_map_raceline.csv")
+
+
+        self.localization_covariance = [0.0, 0.0, 0.0] #to be updated by the localization algorithm
 
         self.map_frame_name     = "map"
-        self.vehicle_frame_name = "ego_racecar/base_link"
+        self.vehicle_frame_name = "base_link"
 
         self.max_raceline_speed = max(self.raceline.velocity_profile)
 
-        self.lookahead_m = 0.6           #lookahead to find out steering angle
-        self.speed_factor = 0.7          #how much of the speed do we want to apply?
-        self.speed_min = 0.1             #minimum speed
-        self.speed_max = 9.0             #maximum speed
+        self.lookahead_m = 0.45           #lookahead to find out steering angle
+        self.speed_factor = 0.5          #how much of the speed do we want to apply?
+        self.speed_min = 1.4             #minimum speed
+        self.speed_max = 4.0             #maximum speed
         self.index_on_raceline = -1      #where on the trajectory are we currently?
 
+        self.max_distance_from_raceline_allowed = 0.35        # if more than so much meters away from the raceline...
+        self.max_distance_from_raceline_allowed_penalty = 0.8 # reduce speed with factor
+
         self.last_steering_angle_rad = 0.0
+        self.crash_prevent_steering_angle_rad = None
 
 
         self.create_timer(1.0, self.debug_publish_raceline)
-        self.create_timer(1.0/20.0, self.dodrive)
+        self.create_timer(1.0/30.0, self.dodrive)
 
     def debug_publish_raceline(self):
         minvel = min(self.raceline.velocity_profile)
@@ -125,16 +142,27 @@ class PurePursuit(Node):
 
     def dynamic_lookahead(self, raceline_index):
         factor = self.raceline.velocity_profile[raceline_index] / self.max_raceline_speed
-        return( max(self.lookahead_m, 5.0*factor*factor*self.lookahead_m) )
+        return( max(self.lookahead_m, 8.0*factor*factor*factor*self.lookahead_m) )
 
     def drive(self):
         #find out where we currently are in the map
-        t = self.tf_buffer.lookup_transform(
-                                    self.map_frame_name,
-                                    self.vehicle_frame_name,
-                                    rclpy.time.Time())
-        x_vehicle_map = t.transform.translation.x
-        y_vehicle_map = t.transform.translation.y
+        try:
+            t = self.tf_buffer.lookup_transform(
+                                        self.map_frame_name,
+                                        self.vehicle_frame_name,
+                                        rclpy.time.Time())
+            x_vehicle_map = t.transform.translation.x
+            y_vehicle_map = t.transform.translation.y
+        except:
+            print(f"No valid transform from {self.map_frame_name} to {self.vehicle_frame_name}. Doin' nothing.", flush=True)
+            drive_msg = AckermannDriveStamped()
+            drive_msg.header.frame_id = self.vehicle_frame_name
+            drive_msg.header.stamp = self.get_clock().now().to_msg()
+            drive_msg.drive.steering_angle = float(self.last_steering_angle_rad)
+            drive_msg.drive.speed = float(0.0)
+            self.publisher_ackermann.publish(drive_msg)
+            return
+
 
         #check if we have lost tracking of the raceline
         if self.index_on_raceline > 0:
@@ -268,8 +296,6 @@ class PurePursuit(Node):
         if y < 0:
             alpha *= -1.0
 
-
-        #print(f"point: {x}, {y} - b = {b}, c = {c}, alpha = {alpha}", flush=True)
         
         #use PID filter for steering signal
         alpha = self.pid.update(alpha)
@@ -277,11 +303,28 @@ class PurePursuit(Node):
         #find the required speed
         speed = self.raceline.velocity_profile[best_idx] * self.speed_factor
 
+        #slow down when derivated too much from raceline
+        if current_distance_from_raceline > self.max_distance_from_raceline_allowed:
+            speed *= self.max_distance_from_raceline_allowed_penalty
+
+        #slow down when localization is bad:
+        if abs(self.localization_covariance[0]) > 0.4 or abs(self.localization_covariance[1]) > 0.15 or abs(self.localization_covariance[2]) > 0.1:
+            speed *= 0.3
+            print(f"slowing down: localization bad: {self.localization_covariance}", flush=True)
+
+
         #make sure speed is between fixed min and max values
         speed = max(self.speed_min, min(speed, self.speed_max))
 
-        if current_distance_from_raceline > 0.2:
-            speed *= 0.3
+        #make sure we do not drive against a wall:
+        if self.crash_prevent_steering_angle_rad is not None:
+            alpha = self.crash_prevent_steering_angle_rad
+            speed = self.speed_min
+
+
+        #limit the steering angle of the vehicle
+        alpha = min(alpha, math.radians(self.vehicle_max_steering_angle_deg))
+        alpha = max(alpha, -math.radians(self.vehicle_max_steering_angle_deg))
 
         #write to VESC
         drive_msg = AckermannDriveStamped()
@@ -295,6 +338,28 @@ class PurePursuit(Node):
         self.index_on_raceline = best_idx
         self.last_steering_angle_rad = alpha
 
+    def cb_new_covariance(self, msg: PoseWithCovarianceStamped):
+        varx = msg.pose.covariance[0]
+        vary = msg.pose.covariance[1]
+        varyaw = msg.pose.covariance[35]
+
+        self.localization_covariance = [varx, vary, varyaw]
+
+    def cb_new_laserscan(self, msg: LaserScan):
+        #do not drive against walls!
+        distance_left  = LaserscanFilter.distance_to_wall(msg, left_wall=True)
+        distance_right = LaserscanFilter.distance_to_wall(msg, left_wall=False)
+
+        #todo: make dependent from distance with PID controller!
+        if distance_left < self.vehicle_width_meters/2.0:
+            self.crash_prevent_steering_angle_rad = math.radians(-10)
+            print("Crash Prevention Steering Correction", flush=True)
+        else:
+            if distance_right < self.vehicle_width_meters/2.0:
+                self.crash_prevent_steering_angle_rad = math.radians(10)
+                print("Crash Prevention Steering Correction", flush=True)
+            else:
+                self.crash_prevent_steering_angle_rad = None
 
     #destructor
     def __del__(self):

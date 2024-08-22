@@ -2,7 +2,6 @@ import random
 import math
 import pycubicspline.pycubicspline as pyspline
 import numpy
-from matplotlib import pyplot
 
 class VehicleDescription:
     def __init__(self, haftreibung: float, vehicle_width_m: float, 

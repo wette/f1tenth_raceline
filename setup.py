@@ -12,6 +12,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('lib/' + package_name, [package_name+'/trajectory.py']),
         ('lib/' + package_name, [package_name+'/pid_controller.py']),
+        ('lib/' + package_name, [package_name+'/laserscan_filter.py']),
         ('lib/' + package_name, [package_name+'/pure_pursuit.py']),
     ],
     install_requires=['setuptools'],
