@@ -15,6 +15,8 @@ from pid_controller import PIDController
 
 from laserscan_filter import LaserscanFilter
 
+from telemetry_monitor_interfaces.msg import Telemetry
+
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros.buffer import Buffer
 import tf2_geometry_msgs #import required to compute transform!
@@ -28,6 +30,7 @@ TOPIC_LASERSCAN = "/scan"
 TOPIC_ODOMETRY = "/odom"
 TOPIC_DEBUG_MARKERARRAY = "/debug/raceline"
 TOPIC_DEBUG_MARKER = "/debug/marker"
+TOPIC_DEBUG_TELEMETRY = "/debug/telemetry"
 TOPIC_LOCALIZATION_COVARIANCE = "/amcl_pose"
 
 
@@ -39,6 +42,7 @@ class PurePursuit(Node):
         self.publisher_ackermann        = self.create_publisher(AckermannDriveStamped, TOPIC_DRIVE, 10)
         self.publisher_markerarray_viz  = self.create_publisher(MarkerArray, TOPIC_DEBUG_MARKERARRAY, 10)
         self.publisher_marker_viz       = self.create_publisher(Marker, TOPIC_DEBUG_MARKER, 10)
+        self.publisher_telemetry        = self.create_publisher(Telemetry, TOPIC_DEBUG_TELEMETRY, 10)
 
         #receive transformations
         self.tf_buffer = Buffer()
@@ -49,6 +53,8 @@ class PurePursuit(Node):
         self.sub_laser  # prevent unused variable warning
         self.sub_covariance = self.create_subscription(PoseWithCovarianceStamped, TOPIC_LOCALIZATION_COVARIANCE, self.cb_new_covariance, 1)
         self.sub_covariance  # prevent unused variable warning
+        self.__sub_odom     = self.create_subscription(Odometry, TOPIC_ODOMETRY, self.callback_on_odom, 1)
+        self.__sub_odom # prevent unused variable warning
 
         #parameters to filter the steering signal before its given to the VESC
         self.pid = PIDController(kp = 1.0, ki = 0.0, kd = 0.0)
@@ -57,13 +63,16 @@ class PurePursuit(Node):
         self.vehicle_width_meters           = 0.28
         self.vehicle_max_steering_angle_deg = 25
 
+        #vehicle state
+        self.vehicle_current_velocity = 0.0 #in meters per second
+
 
         #raceline
         #TODO: Trajectroy constructor w/o arguments...
         vd = VehicleDescription(haftreibung=0.0, vehicle_width_m=0.0, vehicle_acceleration_mss=0.0, vehicle_deceleration_mss=0.0)
         self.raceline = Trajectory(x=[0, 1, 2], y=[0, 1, 2], vehicle_description=vd, resolution=0)
         #TODO: file path from configuration or command line
-        self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/my_map_raceline.csv")
+        self.raceline.load_trajectory_from_file("/home/wette/wette_racecar_ws/my_map_raceline.csv")
 
 
         self.localization_covariance = [0.0, 0.0, 0.0] #to be updated by the localization algorithm
@@ -88,6 +97,9 @@ class PurePursuit(Node):
 
         self.create_timer(1.0, self.debug_publish_raceline)
         self.create_timer(1.0/30.0, self.dodrive)
+
+    def callback_on_odom(self, msg: Odometry):
+        self.vehicle_current_velocity = float( math.sqrt( msg.twist.twist.linear.x **2 + msg.twist.twist.linear.y **2) )
 
     def debug_publish_raceline(self):
         minvel = min(self.raceline.velocity_profile)
@@ -333,10 +345,29 @@ class PurePursuit(Node):
         drive_msg.drive.steering_angle = float(alpha)
         drive_msg.drive.speed = float(speed)
         self.publisher_ackermann.publish(drive_msg)
+
+        #publish odometry
+        #FIXME: lateral derivation only corse guess!
+        self.publish_telemetry(next_waypoint_id=best_idx, 
+                               pos_x_map=x_vehicle_map, 
+                               pos_y_map=y_vehicle_map, 
+                               target_velocity=speed, 
+                               actual_velocity=self.vehicle_current_velocity, 
+                               lateral_derivation=current_distance_from_raceline)
                 
         #variable contents for next iteration
         self.index_on_raceline = best_idx
         self.last_steering_angle_rad = alpha
+
+    def publish_telemetry(self, next_waypoint_id, pos_x_map, pos_y_map, target_velocity, actual_velocity, lateral_derivation):
+        msg = Telemetry()
+        msg.next_waypoint_id = next_waypoint_id
+        msg.pos_x = pos_x_map
+        msg.pos_y = pos_y_map
+        msg.target_velocity = target_velocity
+        msg.actual_velocity = actual_velocity
+        msg.lateral_derivation = lateral_derivation
+        self.publisher_telemetry.publish(msg)
 
     def cb_new_covariance(self, msg: PoseWithCovarianceStamped):
         varx = msg.pose.covariance[0]
