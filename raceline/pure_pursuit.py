@@ -17,6 +17,9 @@ from laserscan_filter import LaserscanFilter
 
 from telemetry_monitor_interfaces.msg import Telemetry
 
+import aesthetic_control_interfaces.srv as ae_srv
+import aesthetic_control_interfaces.msg as ae_msg
+
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros.buffer import Buffer
 import tf2_geometry_msgs #import required to compute transform!
@@ -56,6 +59,16 @@ class PurePursuit(Node):
         self.__sub_odom     = self.create_subscription(Odometry, TOPIC_ODOMETRY, self.callback_on_odom, 1)
         self.__sub_odom # prevent unused variable warning
 
+        #create services
+        self.__services = {}
+        self.__services["underglow"]        = self.create_client(ae_srv.Underglow,      '/carAest/underglow')
+        
+        #connect to services
+        for service in self.__services.values():
+            while not service.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info(f'{service} service not available, waiting again...')
+        
+
         #parameters to filter the steering signal before its given to the VESC
         self.pid = PIDController(kp = 1.0, ki = 0.0, kd = 0.0)
 
@@ -65,6 +78,7 @@ class PurePursuit(Node):
 
         #vehicle state
         self.vehicle_current_velocity = 0.0 #in meters per second
+        self.lateral_derivation_history = []
 
 
         #raceline
@@ -72,7 +86,7 @@ class PurePursuit(Node):
         vd = VehicleDescription(haftreibung=0.0, vehicle_width_m=0.0, vehicle_acceleration_mss=0.0, vehicle_deceleration_mss=0.0)
         self.raceline = Trajectory(x=[0, 1, 2], y=[0, 1, 2], vehicle_description=vd, resolution=0)
         #TODO: file path from configuration or command line
-        self.raceline.load_trajectory_from_file("/home/wette/wette_racecar_ws/my_map_raceline.csv")
+        self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/bueckeburgOvalRaceline.csv")
 
 
         self.localization_covariance = [0.0, 0.0, 0.0] #to be updated by the localization algorithm
@@ -83,9 +97,9 @@ class PurePursuit(Node):
         self.max_raceline_speed = max(self.raceline.velocity_profile)
 
         self.lookahead_m = 0.45           #lookahead to find out steering angle
-        self.speed_factor = 0.5          #how much of the speed do we want to apply?
-        self.speed_min = 1.4             #minimum speed
-        self.speed_max = 4.0             #maximum speed
+        self.speed_factor = 0.3          #how much of the speed do we want to apply?
+        self.speed_min = 1.0             #minimum speed
+        self.speed_max = 3.0             #maximum speed
         self.index_on_raceline = -1      #where on the trajectory are we currently?
 
         self.max_distance_from_raceline_allowed = 0.35        # if more than so much meters away from the raceline...
@@ -97,6 +111,11 @@ class PurePursuit(Node):
 
         self.create_timer(1.0, self.debug_publish_raceline)
         self.create_timer(1.0/30.0, self.dodrive)
+
+    def get_underglow_msg(self, color):
+        glow_msg= ae_msg.UnderglowColor()
+        glow_msg.set_underglow_color = color
+        return glow_msg
 
     def callback_on_odom(self, msg: Odometry):
         self.vehicle_current_velocity = float( math.sqrt( msg.twist.twist.linear.x **2 + msg.twist.twist.linear.y **2) )
@@ -154,7 +173,9 @@ class PurePursuit(Node):
 
     def dynamic_lookahead(self, raceline_index):
         factor = self.raceline.velocity_profile[raceline_index] / self.max_raceline_speed
-        return( max(self.lookahead_m, 8.0*factor*factor*factor*self.lookahead_m) )
+        desired_lookahead = max(self.lookahead_m, 8.0*factor*factor*factor*self.lookahead_m)
+
+        return desired_lookahead
 
     def drive(self):
         #find out where we currently are in the map
@@ -185,7 +206,6 @@ class PurePursuit(Node):
             if len_diff > 2.0:
                 self.index_on_raceline = -1
 
-        #print(f"x_vehicle_map: {x_vehicle_map}, y_vehicle_map: {y_vehicle_map}")
 
         #find the point of the raceline where we currently are
         best_diff = 100000
@@ -208,15 +228,18 @@ class PurePursuit(Node):
                     break
         
         current_distance_from_raceline = best_diff
-
-        #print(f"closest point: {best_idx}")
                 
         #lookahead distance should be adaptable to current conditions
         #in curves, it should be smaller, on straights it should be larger
         lookahead = self.dynamic_lookahead(best_idx)
 
-        #find the required steering angle
-        #find next point on trajectory which is self.lookahead awy from current position of vehicle
+
+
+        ###################################
+        #find the required steering angle #
+        ###################################
+
+        #find next point on trajectory which is self.lookahead away from current position of vehicle
         best_next_idx = best_idx
         best_diff = 100000
         found_better_point = False
@@ -230,6 +253,9 @@ class PurePursuit(Node):
                 best_diff = len_diff
                 best_next_idx = idx
                 found_better_point = True
+
+                #experimental: make lookahead dynamic based on the velocity profile ahead of the vehicle
+                lookahead = min(lookahead, self.dynamic_lookahead(best_next_idx))
             else:
                 if found_better_point:
                     #last time we found a better point - this time not:
@@ -243,28 +269,7 @@ class PurePursuit(Node):
         x, y = self.transformPoint(x, y, self.map_frame_name, self.vehicle_frame_name)
 
         #DEBUG: publish closest point
-        m = Marker()
-        m.header.frame_id = self.vehicle_frame_name
-        m.header.stamp = self.get_clock().now().to_msg()
-        m.ns = "debug_raceline"
-        m.id = 132478
-        m.type = Marker.SPHERE
-        m.action = Marker.ADD
-        m.pose.position.x = x
-        m.pose.position.y = y
-        m.pose.position.z = 0.0
-        m.pose.orientation.x = 0.0
-        m.pose.orientation.y = 0.0
-        m.pose.orientation.z = 0.0
-        m.pose.orientation.w = 0.0
-        m.scale.x = 0.5
-        m.scale.y = 0.5
-        m.scale.z = 0.5
-        m.color.r = 1.0
-        m.color.g = 1.0
-        m.color.b = 1.0
-        m.color.a = 1.0
-        self.publisher_marker_viz.publish(m)
+        self.publish_point(x, y, 132478, 1.0, 1.0, 1.0, "debug_raceline")
 
         x = self.raceline.x[best_next_idx]
         y = self.raceline.y[best_next_idx]
@@ -274,28 +279,8 @@ class PurePursuit(Node):
 
 
         #publish target point
-        m = Marker()
-        m.header.frame_id = self.vehicle_frame_name
-        m.header.stamp = self.get_clock().now().to_msg()
-        m.ns = "debug_raceline"
-        m.id = 132479
-        m.type = Marker.SPHERE
-        m.action = Marker.ADD
-        m.pose.position.x = x
-        m.pose.position.y = y
-        m.pose.position.z = 0.0
-        m.pose.orientation.x = 0.0
-        m.pose.orientation.y = 0.0
-        m.pose.orientation.z = 0.0
-        m.pose.orientation.w = 0.0
-        m.scale.x = 0.5
-        m.scale.y = 0.5
-        m.scale.z = 0.5
-        m.color.r = 0.0
-        m.color.g = 0.0
-        m.color.b = 1.0
-        m.color.a = 1.0
-        self.publisher_marker_viz.publish(m)
+        self.publish_point(x, y, 132479, 0.0, 0.0, 1.0, "debug_raceline")
+
 
         #compute angle to target_point (x,y) (already in vehicle frame)
         b = x
@@ -354,10 +339,69 @@ class PurePursuit(Node):
                                target_velocity=speed, 
                                actual_velocity=self.vehicle_current_velocity, 
                                lateral_derivation=current_distance_from_raceline)
+        
+        #visualize lateral derivation using the underglow lights
+        self.underglow(current_distance_from_raceline)
+
+        #update raceline
+        #self.update_raceline_velocity(current_waypoint=best_idx, 
+        #                              lateral_derivation=current_distance_from_raceline)
                 
         #variable contents for next iteration
         self.index_on_raceline = best_idx
         self.last_steering_angle_rad = alpha
+
+
+    def update_raceline_velocity(self, current_waypoint, lateral_derivation):
+        #if lateral derivation is very low --> increase speed, if too high --> decrease
+        history_length = 5
+        high_thres = 0.35
+        low_thres = 0.2
+    
+        self.lateral_derivation_history.append( (current_waypoint, lateral_derivation) )
+        self.lateral_derivation_history = self.lateral_derivation_history[-history_length:]
+
+
+        high_count = 0
+        low_count = 0
+        mid_count = 0
+
+        for wp, ld in self.lateral_derivation_history:
+            if ld > high_thres:
+                high_count += 1
+            if low_thres >= ld <= high_thres:
+                mid_count += 1
+            if ld < low_thres:
+                low_count += 1
+
+
+        first_wp = self.lateral_derivation_history[0][0]
+        last_wp = self.lateral_derivation_history[-1][0]
+
+        num_wp = (len(self.raceline.x) - first_wp) - (len(self.raceline.x) - last_wp)
+
+        if low_count == history_length:
+            #increase raceline speed for all history
+            for i in range(num_wp):
+                wp = first_wp+i % len(self.raceline.x) #to acount for wrap around
+                self.raceline.velocity_profile[wp] *= 1.03 # 3% increase
+            self.lateral_derivation_history.clear()
+        if high_count > 0:
+            #decrease raceline speed for all history
+            for i in range(num_wp):
+                wp = first_wp+i % len(self.raceline.x) #to acount for wrap around
+                self.raceline.velocity_profile[wp] = max(self.raceline.velocity_profile[wp]*0.95, self.speed_min) # 5% decrease
+            self.lateral_derivation_history.clear()
+
+
+        
+
+    def underglow(self, current_distance_from_raceline):
+        max_dev = 0.4 #all red
+        dev_val = min(abs(current_distance_from_raceline), max_dev)
+        red = dev_val / max_dev
+        green = 1.0-red
+        self.__services["underglow"].call_async(ae_srv.Underglow.Request(glow=self.get_underglow_msg([int(red*255),int(green*255),0])))
 
     def publish_telemetry(self, next_waypoint_id, pos_x_map, pos_y_map, target_velocity, actual_velocity, lateral_derivation):
         msg = Telemetry()
@@ -391,6 +435,30 @@ class PurePursuit(Node):
                 print("Crash Prevention Steering Correction", flush=True)
             else:
                 self.crash_prevent_steering_angle_rad = None
+
+    def publish_point(self, x, y, id, r, g, b, namespace):
+        m = Marker()
+        m.header.frame_id = self.vehicle_frame_name
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.ns = namespace
+        m.id = id
+        m.type = Marker.SPHERE
+        m.action = Marker.ADD
+        m.pose.position.x = x
+        m.pose.position.y = y
+        m.pose.position.z = 0.0
+        m.pose.orientation.x = 0.0
+        m.pose.orientation.y = 0.0
+        m.pose.orientation.z = 0.0
+        m.pose.orientation.w = 0.0
+        m.scale.x = 0.5
+        m.scale.y = 0.5
+        m.scale.z = 0.5
+        m.color.r = r
+        m.color.g = g
+        m.color.b = b
+        m.color.a = 1.0
+        self.publisher_marker_viz.publish(m)
 
     #destructor
     def __del__(self):
