@@ -86,8 +86,10 @@ class PurePursuit(Node):
         vd = VehicleDescription(haftreibung=0.0, vehicle_width_m=0.0, vehicle_acceleration_mss=0.0, vehicle_deceleration_mss=0.0)
         self.raceline = Trajectory(x=[0, 1, 2], y=[0, 1, 2], vehicle_description=vd, resolution=0)
         #TODO: file path from configuration or command line
-        self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/bueckeburgOvalRaceline.csv")
 
+        self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/minden_raceline.csv")
+
+        self.lateral_derivation_history = []
 
         self.localization_covariance = [0.0, 0.0, 0.0] #to be updated by the localization algorithm
 
@@ -97,9 +99,11 @@ class PurePursuit(Node):
         self.max_raceline_speed = max(self.raceline.velocity_profile)
 
         self.lookahead_m = 0.45           #lookahead to find out steering angle
-        self.speed_factor = 0.3          #how much of the speed do we want to apply?
-        self.speed_min = 1.0             #minimum speed
-        self.speed_max = 3.0             #maximum speed
+
+        self.speed_factor = 0.6          #how much of the speed do we want to apply?
+        self.speed_min = 0.6             #minimum speed
+        self.speed_max = 3.3             #maximum speed
+
         self.index_on_raceline = -1      #where on the trajectory are we currently?
 
         self.max_distance_from_raceline_allowed = 0.35        # if more than so much meters away from the raceline...
@@ -173,7 +177,8 @@ class PurePursuit(Node):
 
     def dynamic_lookahead(self, raceline_index):
         factor = self.raceline.velocity_profile[raceline_index] / self.max_raceline_speed
-        desired_lookahead = max(self.lookahead_m, 8.0*factor*factor*factor*self.lookahead_m)
+
+        desired_lookahead = max(self.lookahead_m, 6*factor*self.lookahead_m)
 
         return desired_lookahead
 
@@ -225,7 +230,8 @@ class PurePursuit(Node):
                 if self.index_on_raceline > -1 and found_better_point:
                     #last time we found a better point - this time not:
                     # we can end the search as from now on, we will be moving away from the best point
-                    break
+                    #break
+                    pass
         
         current_distance_from_raceline = best_diff
                 
@@ -306,7 +312,7 @@ class PurePursuit(Node):
 
         #slow down when localization is bad:
         if abs(self.localization_covariance[0]) > 0.4 or abs(self.localization_covariance[1]) > 0.15 or abs(self.localization_covariance[2]) > 0.1:
-            speed *= 0.3
+            speed *= 0.4
             print(f"slowing down: localization bad: {self.localization_covariance}", flush=True)
 
 
@@ -344,8 +350,9 @@ class PurePursuit(Node):
         self.underglow(current_distance_from_raceline)
 
         #update raceline
-        #self.update_raceline_velocity(current_waypoint=best_idx, 
-        #                              lateral_derivation=current_distance_from_raceline)
+
+        self.update_raceline_velocity(current_waypoint=best_idx, 
+                                      lateral_derivation=current_distance_from_raceline)
                 
         #variable contents for next iteration
         self.index_on_raceline = best_idx
@@ -391,6 +398,7 @@ class PurePursuit(Node):
             for i in range(num_wp):
                 wp = first_wp+i % len(self.raceline.x) #to acount for wrap around
                 self.raceline.velocity_profile[wp] = max(self.raceline.velocity_profile[wp]*0.95, self.speed_min) # 5% decrease
+
             self.lateral_derivation_history.clear()
 
 
@@ -398,6 +406,7 @@ class PurePursuit(Node):
 
     def underglow(self, current_distance_from_raceline):
         max_dev = 0.4 #all red
+
         dev_val = min(abs(current_distance_from_raceline), max_dev)
         red = dev_val / max_dev
         green = 1.0-red
