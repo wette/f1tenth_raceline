@@ -90,6 +90,7 @@ class PurePursuit(Node):
         self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/minden_raceline.csv")
 
         self.lateral_derivation_history = []
+        if self.last_waypoint_update_velocity = None
 
         self.localization_covariance = [0.0, 0.0, 0.0] #to be updated by the localization algorithm
 
@@ -349,10 +350,10 @@ class PurePursuit(Node):
         #visualize lateral derivation using the underglow lights
         self.underglow(current_distance_from_raceline)
 
-        #update raceline
-
-        self.update_raceline_velocity(current_waypoint=best_idx, 
-                                      lateral_derivation=current_distance_from_raceline)
+        #update raceline but only when we are actually driving
+        if self.vehicle_current_velocity >= self.speed_min:
+            self.update_raceline_velocity(current_waypoint=best_idx, 
+                                        lateral_derivation=current_distance_from_raceline)
                 
         #variable contents for next iteration
         self.index_on_raceline = best_idx
@@ -361,9 +362,15 @@ class PurePursuit(Node):
 
     def update_raceline_velocity(self, current_waypoint, lateral_derivation):
         #if lateral derivation is very low --> increase speed, if too high --> decrease
-        history_length = 5
+        history_length = 15
         high_thres = 0.35
         low_thres = 0.2
+
+        if self.last_waypoint_update_velocity == current_waypoint:
+            return
+        
+        #update state for next iteration
+        self.last_waypoint_update_velocity = current_waypoint
     
         self.lateral_derivation_history.append( (current_waypoint, lateral_derivation) )
         self.lateral_derivation_history = self.lateral_derivation_history[-history_length:]
@@ -392,6 +399,7 @@ class PurePursuit(Node):
             for i in range(num_wp):
                 wp = first_wp+i % len(self.raceline.x) #to acount for wrap around
                 self.raceline.velocity_profile[wp] *= 1.03 # 3% increase
+
             self.lateral_derivation_history.clear()
         if high_count > 0:
             #decrease raceline speed for all history
