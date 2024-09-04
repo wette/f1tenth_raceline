@@ -29,38 +29,50 @@ class Trajectory:
         self.do_forwards_pass = False #gives straighter lines as there is more emphasis on acceleration
 
         self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=len(self.y))
-        self.remove_overlapping_points()
+        self.remove_overlapping_points(leave_in_cycle=False)
+        self.x.append(self.x[0])
+        self.y.append(self.y[0])
+        self.curvature.append(self.curvature[0])
+        #first and last point of spline are same. to compute curvature for the loop, we need one more overlapping point:
+        #self.x.append(self.x[1])
+        #self.y.append(self.y[1])
+        #self.x.append(self.x[2])
+        #self.y.append(self.y[2])
+        #self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=len(self.y))
 
     def get_vehicle_description(self):
         return VehicleDescription(self.haftreibung, self.vehicle_width_m, self.vehicle_acceleration_mss, self.vehicle_deceleration_mss)
 
     def remove_overlapping_points(self, leave_in_cycle=True):
         """remove points at the end of the spline that overlap with points at the beginning at the spline."""
-        dx = self.x[1]-self.x[2]
-        dy = self.y[1]-self.y[2]
+        dx = self.x[5]-self.x[6]
+        dy = self.y[5]-self.y[6]
         l2 = math.sqrt(dx*dx+dy*dy)
         eps = l2*0.8  #if a point is closer than 80% of the default distance, its considered as a duplicate.
         toRemove = []
-        for i in range(len(self.x)-1, 1, -1):
-            found = False
-            for j in range(0, len(self.x)):
+        cont_i = False
+        for i in range(0, len(self.x)-1):
+            for j in range(i+1, len(self.x)):
                 if i == j:
                     continue
                 dx = self.x[i]-self.x[j]
                 dy = self.y[i]-self.y[j]
                 l2 = math.sqrt(dx*dx+dy*dy)
                 if(l2 < eps):
-                    found = True
                     #same point - remove.
                     if not i in toRemove:
                         toRemove.append(i)
-            if not found:
-                break
+                        cont_i = True
+                        continue
+            if cont_i:
+                cont_i = False
+                continue
 
+        toRemove.reverse()
         #in order to have a cycle, we need to keep one overlapping point.
-        end_idx = len(toRemove)-2
+        end_idx = len(toRemove)-1       #HERE: changed from -2 to -1
         if not leave_in_cycle:
-            end_idx = len(toRemove)-1
+            end_idx = len(toRemove)-0   #HERE: changed from -1 to 0
 
         for i in range(0, end_idx):
             self.x.pop(toRemove[i])
@@ -105,8 +117,12 @@ class Trajectory:
         #This assumes infinite acceleration/deceleration and gives us the max. possible cornering speeds.
         self.velocity_profile = []
         for i in range(0, len(self.x)):
-            max_velocity = math.sqrt(self.haftreibung/(1.0-self.haftreibung) * 9.8 * abs(1.0/self.curvature[i]))
+            max_velocity = math.sqrt(self.haftreibung/(1.0-self.haftreibung) * 9.8 * 1.0/max(abs(self.curvature[i]), 0.0001))
             self.velocity_profile.append(max_velocity)
+
+        #as first and last point have curv. = 0, max velocity does not make sense there
+        self.velocity_profile[0]  = self.velocity_profile[1]
+        self.velocity_profile[-1] = self.velocity_profile[-2]
 
         # we now need to resitict speed on the straights such that we have enough braking power to decelerate
         # to this end, find the lowest speed, and go back over the trajectory and decrease speeds if nececcary
@@ -157,6 +173,16 @@ class Trajectory:
         if self.laptime is not None:
             return self.laptime
         
+        if len(self.x) < 100:
+            #make more fine grained trajectory and compute on this
+            lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(self.x + self.x[1:2], self.y + self.y[1:2], num=200)
+            rl = Trajectory(lx, ly, self.get_vehicle_description(), self.resolution)
+            rl.do_forwards_pass = True
+
+            self.laptime = rl.get_laptime()
+            return self.laptime
+
+        #actual computation of laptime based on a trajectory with sufficient points.
         self.compute_velocity_profile()
         #compute length of spline and divide by velocity --> time
         self.laptime = 0.0
@@ -201,10 +227,11 @@ class Trajectory:
 
         return dx/length, dy/length
 
-    def random_changes(self, max_change_px: float, num_changes: int, map: list):
+    def random_changes(self, max_change_px: float, num_changes: int, map: list, num_ctrl_points: int, idx=None):
         """randomly change the trajectory"""
         for i in range(num_changes):
-            idx = random.randint(0, len(self.x)-2) #exclude last point
+            if idx is None:
+                idx = random.randint(0, len(self.x)-2) #exclude last point
             x = self.x[idx]
             y = self.y[idx]
             #test different changes - keep the first one which is in free space
@@ -235,12 +262,20 @@ class Trajectory:
                 self.x[(idx-j) % len(self.x)] += change*normalx * 1.0/(j+1)
                 self.y[(idx-j) % len(self.x)] += change*normaly * 1.0/(j+1)
 
+                #make sure first and last points are the same
+                if (idx+j) % len(self.x) == 0 or (idx-j) % len(self.x) == 0:
+                    self.x[len(self.x)-1] = self.x[0]
+                    self.y[len(self.y)-1] = self.y[0]
+                if (idx+j) % len(self.x) == len(self.x)-1 or (idx-j) % len(self.x) == len(self.x)-1:
+                    self.x[0] = self.x[len(self.x)-1]
+                    self.y[0] = self.y[len(self.y)-1]
+
         #apply spline smoothing
-        self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=len(self.y))
+        self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=num_ctrl_points)
         self.length = None
         self.laptime = None
 
-    def random_combination(self, other_trajectory: 'Trajectory'):
+    def random_combination(self, other_trajectory: 'Trajectory', num_ctrl_points: int):
         start_idx = random.randint(0, len(self.x)-1)
         end_idx   = random.randint(start_idx, len(self.x)-1)
 
@@ -257,7 +292,9 @@ class Trajectory:
         self.y[0] = self.y[len(self.y)-1]
 
         #apply spline smoothing
-        self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=len(self.y))
+        self.remove_overlapping_points()
+        self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=num_ctrl_points)
+        self.remove_overlapping_points()
         self.length = None
         self.laptime = None
 

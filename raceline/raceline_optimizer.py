@@ -36,7 +36,7 @@ class RacelineOptimizer:
     def debug_draw_trajectory(self, trajectory : Trajectory, filename: str = None):
         pyplot.imshow(self.__map.get_pixel_map())
 
-        lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x, trajectory.y, num=300)
+        lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x + trajectory.x[1:2], trajectory.y + trajectory.y[1:2], num=300)
 
         rl = Trajectory(lx, ly, trajectory.get_vehicle_description(), trajectory.resolution)
         rl.do_forwards_pass = True
@@ -109,7 +109,8 @@ class RacelineOptimizer:
     def optimize_raceline(self, initial_trajectory: Trajectory, turning_radius_m: float, 
                           num_epochs=250, num_keep=20, num_population=200, 
                           max_change_in_pixels=3, num_changes_per_mutation=1,
-                          filename="my_map_raceline.csv", num_points_file=300) -> Trajectory:
+                          filename="my_map_raceline.csv", num_points_file=300, 
+                          num_ctrl_points=40) -> Trajectory:
         """use a genetic algorithm to find a raceline"""
 
         def remove_all_but_top(population: list, num_keep: int):
@@ -120,7 +121,7 @@ class RacelineOptimizer:
         population = []
         for i in range(num_population):
             t = initial_trajectory.copy()
-            t.random_changes(max_change_in_pixels, num_changes_per_mutation, self.__map)
+            t.random_changes(max_change_in_pixels, num_changes_per_mutation, self.__map, num_ctrl_points=num_ctrl_points)
             population.append(t)
         population.append(initial_trajectory.copy()) #keep in the original one w/o modifications
 
@@ -139,20 +140,20 @@ class RacelineOptimizer:
 
             #mutate offspring
             for rl in new_childs:
-                rl.random_changes(max_change_in_pixels, num_changes_per_mutation, self.__map)
+                rl.random_changes(max_change_in_pixels, num_changes_per_mutation, self.__map, num_ctrl_points=num_ctrl_points)
             
             new_childs += population[:] #copy over old trajectories to new childs for random_combination
             
             #combine a random pair of trajectories
             combined_childs = []
-            random.shuffle(new_childs)
+            """random.shuffle(new_childs)
             for i in range(0, int(len(new_childs)/2)):
                 i = random.randint(0, len(new_childs)-1)
                 j = random.randint(0, len(new_childs)-1)
                 combined = new_childs[i].copy()
-                combined.random_combination(new_childs[j])
+                combined.random_combination(new_childs[j], num_ctrl_points=num_ctrl_points)
                 combined_childs.append( combined )
-            
+            """
 
             #add the newly mutated children to population:
             for l in new_childs:
@@ -162,7 +163,7 @@ class RacelineOptimizer:
 
             #make sure population are NOT driving through non-free space!
             #and that turning radius is feasable for the vehicle
-            max_curvature = turning_radius_m/population[0].resolution
+            max_curvature = 1.0 / (turning_radius_m/population[0].resolution)
             vehicle_width_in_map_pixels = math.ceil(population[0].vehicle_width_m / self.__config['resolution'])
             for l in population[:]:
                 lx,ly, _, curvature, _ = pyspline.calc_2d_spline_interpolation(l.x, l.y, num=500)
@@ -210,7 +211,8 @@ class RacelineOptimizer:
             population = remove_all_but_top(population, num_keep)
 
             #print length of best raceline.
-            print(f"raceline length/laptime in epoch {e}: {population[-1].get_length()} / {population[-1].get_laptime()}")
+            
+            print(f"raceline length/laptime in epoch {e}: {population[-1].get_length() * self.get_map().get_resolution()} / {population[-1].get_laptime() * self.get_map().get_resolution()}")
             self.debug_draw_trajectory(population[-1], f"racelines/racelineEpoch{e}.png")
             population[-1].safe_trajectory_to_file(self.get_map(), filename, num_points=num_points_file)
             
@@ -221,30 +223,34 @@ class RacelineOptimizer:
 
 def main():
     haftreibung                 = 0.05
-    vehicle_width_m             = 0.6      #half width is minimum distance to any wall at any time
+    vehicle_width_m             = 0.5#0.3      #half width is minimum distance to any wall at any time
     vehicle_acceleration_mss    = 10.0     #vehicle acceleration in meters/sec/sec
-    vehicle_deceleration_mss    = 5.0     #vehicle deceleration in meters/sec/sec
-    turning_radius_m            = 1.4      #turning radius of the vehicle in meters
+    vehicle_deceleration_mss    = 3.0     #vehicle deceleration in meters/sec/sec
+    turning_radius_m            = 1.0/2.0      #turning radius of the vehicle in meters
 
     desired_points_per_meter    = 1.0      #how many control points to use during optimization per spline (you want as few as possible!)
-    max_change_per_point_meters = 0.2      #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
+    max_change_per_point_meters = 0.5      #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
 
-    num_epochs                  = 100       #number of optimization epochs
-    num_keep                    = 100      #number of trajectories to keep after each epoch
+    num_epochs                  = 1000       #number of optimization epochs
+    num_keep                    = 50      #number of trajectories to keep after each epoch
     num_population              = 1000     #population size during epoch
-    num_changes_per_mutation    = 2#5        #number of controlpoint changes during a mutation
+    num_changes_per_mutation    = 2        #number of controlpoint changes during a mutation
 
 
-    opt = RacelineOptimizer("/tmp/mindenCitySpeedway4.yaml")
+    opt = RacelineOptimizer("/Users/wette/Documents/FHBielefeld/eigeneVorlesungen/F110/repositories/wette_racecar_ws/minden.yaml")
     
     #for development: fixed start trajectory - in production this should come from waypoints sampled from follow the gap algorithm.
-    x,y = opt.get_manual_initial_centerline()
+    #x,y = opt.get_manual_initial_centerline()
 
     #minden city speedway initial trajectory
-    #x = [258, 296, 312, 313, 311, 301, 281, 258, 239, 230, 221, 213, 197, 176, 163, 165, 177, 186, 185, 173, 155, 136, 118, 101, 80, 65, 55, 57, 74, 94, 113, 126, 129, 119, 105, 102, 106, 124, 147, 173, 199, 227]
-    #y = [47, 52, 67, 94, 124, 154, 168, 169, 163, 143, 121, 100, 88, 87, 99, 117, 131, 144, 159, 165, 162, 157, 154, 153, 153, 152, 140, 126, 120, 120, 119, 111, 96, 81, 70, 57, 43, 38, 39, 42, 42, 44]
+    x = [167, 191, 212, 243, 273, 302, 319, 328, 329, 321, 311, 296, 279, 263, 246, 233, 226, 213, 197, 186, 183, 184, 193, 203, 209, 199, 185, 165, 139, 115, 98, 81, 77, 83, 96, 110, 117, 118, 111, 109, 117, 130, 146]
+    y = [28, 27, 24, 22, 21, 23, 40, 61, 85, 104, 122, 128, 131, 128, 122, 106, 78, 68, 68, 79, 88, 101, 111, 125, 143, 154, 158, 157, 157, 155, 154, 144, 130, 114, 105, 93, 79, 65, 53, 39, 30, 25, 24, 28]
 
-
+    """#max_change_per_point_meters must be smaller than half desired_points_per_meter
+    if desired_points_per_meter/2 < (max_change_per_point_meters+0.1):
+        print("Error: max_change_per_point_meters is too large!")
+        return
+    """
     #add the first point of the spine as last, too -> circle
     x.append(x[0])
     y.append(y[0])
@@ -265,14 +271,13 @@ def main():
     raceline = opt.optimize_raceline(initial_trajectory=original, turning_radius_m=turning_radius_m, num_epochs=num_epochs, num_keep=num_keep, num_population=num_population, 
                                     num_changes_per_mutation=num_changes_per_mutation, 
                                     max_change_in_pixels=max_change_per_point_meters/opt.get_config()["resolution"],
-                                    filename="my_map_raceline.csv", num_points_file=300)
+                                    filename="my_map_raceline.csv", num_points_file=300,
+                                    num_ctrl_points=num_ctrl_points)
 
     raceline.laptime = None
     raceline.do_forwards_pass = True
     print(f"Raceline time: {raceline.get_laptime()}")
     opt.debug_draw_trajectory(raceline)
-
-    
 
 
 if __name__ == "__main__":
