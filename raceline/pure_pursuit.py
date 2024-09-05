@@ -90,7 +90,8 @@ class PurePursuit(Node):
         self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/minden_raceline.csv")
 
         self.lateral_derivation_history = []
-        if self.last_waypoint_update_velocity = None
+        self.last_waypoint_update_velocity = None
+        self.enable_veriable_raceline_speed_adaptation = False #let the car change speed of the raceline over time
 
         self.localization_covariance = [0.0, 0.0, 0.0] #to be updated by the localization algorithm
 
@@ -351,9 +352,10 @@ class PurePursuit(Node):
         self.underglow(current_distance_from_raceline)
 
         #update raceline but only when we are actually driving
-        if self.vehicle_current_velocity >= self.speed_min:
-            self.update_raceline_velocity(current_waypoint=best_idx, 
-                                        lateral_derivation=current_distance_from_raceline)
+        if self.enable_veriable_raceline_speed_adaptation == True:
+            if self.vehicle_current_velocity >= self.speed_min:
+                self.update_raceline_velocity(current_waypoint=best_idx, 
+                                            lateral_derivation=current_distance_from_raceline)
                 
         #variable contents for next iteration
         self.index_on_raceline = best_idx
