@@ -33,7 +33,7 @@ class RacelineOptimizer:
         pyplot.imshow(self.__map.get_pixel_map())
         pyplot.show()
 
-    def debug_draw_trajectory(self, trajectory : Trajectory, filename: str = None):
+    def debug_draw_trajectory(self, trajectory : Trajectory, filename: str = None, title: str = None):
         pyplot.imshow(self.__map.get_pixel_map())
 
         lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x + trajectory.x[1:2], trajectory.y + trajectory.y[1:2], num=300)
@@ -41,14 +41,17 @@ class RacelineOptimizer:
         rl = Trajectory(lx, ly, trajectory.get_vehicle_description(), trajectory.resolution)
         rl.do_forwards_pass = True
         rl.compute_velocity_profile()
-        print(f"Raceline with 300 points time: {rl.get_laptime()}")
+        #print(f"Raceline with 300 points time: {rl.get_laptime()}")
 
         pyplot.scatter(rl.x,rl.y, c=rl.velocity_profile, linewidth=1, cmap=pyplot.cm.coolwarm)
         pyplot.colorbar()
+
+        if title is not None:
+            pyplot.title(title)
         
         try:
             if filename is not None:
-                pyplot.savefig(filename)
+                pyplot.savefig(filename, dpi=200)
                 pyplot.clf()
             else:
                 pyplot.show()
@@ -211,9 +214,9 @@ class RacelineOptimizer:
             population = remove_all_but_top(population, num_keep)
 
             #print length of best raceline.
-            
-            print(f"raceline length/laptime in epoch {e}: {population[-1].get_length() * self.get_map().get_resolution()} / {population[-1].get_laptime() * self.get_map().get_resolution()}")
-            self.debug_draw_trajectory(population[-1], f"racelines/racelineEpoch{e}.png")
+            laptime_s = population[-1].get_laptime() * self.get_map().get_resolution()
+            print(f"raceline length/laptime in epoch {e}: {population[-1].get_length() * self.get_map().get_resolution()} / {laptime_s}")
+            self.debug_draw_trajectory(population[-1], f"racelines/racelineEpoch{e}.png", title=f"Epoch {e} - Laptime {laptime_s}s")
             population[-1].safe_trajectory_to_file(self.get_map(), filename, num_points=num_points_file)
             
         
@@ -277,7 +280,7 @@ def main():
     raceline.laptime = None
     raceline.do_forwards_pass = True
     print(f"Raceline time: {raceline.get_laptime()}")
-    opt.debug_draw_trajectory(raceline)
+    opt.debug_draw_trajectory(raceline, title="")
 
 
 if __name__ == "__main__":
