@@ -225,16 +225,17 @@ class RacelineOptimizer:
     
 
 def main():
-    haftreibung                 = 0.05
-    vehicle_width_m             = 0.5#0.3      #half width is minimum distance to any wall at any time
-    vehicle_acceleration_mss    = 10.0     #vehicle acceleration in meters/sec/sec
+    haftreibung                 = 5.0   #kg force to move standing vehicle in lateral direction
+    vehicle_mass_kg             = 3.0
+    vehicle_width_m             = 0.6#0.3      #half width is minimum distance to any wall at any time
+    vehicle_acceleration_mss    = 7.0     #vehicle acceleration in meters/sec/sec
     vehicle_deceleration_mss    = 3.0     #vehicle deceleration in meters/sec/sec
-    turning_radius_m            = 1.0/2.0      #turning radius of the vehicle in meters
+    turning_radius_m            = 1.2/2.0 #1.0/2.0      #turning radius of the vehicle in meters
 
     desired_points_per_meter    = 1.0      #how many control points to use during optimization per spline (you want as few as possible!)
     max_change_per_point_meters = 0.5      #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
 
-    num_epochs                  = 1000       #number of optimization epochs
+    num_epochs                  = 100       #number of optimization epochs
     num_keep                    = 50      #number of trajectories to keep after each epoch
     num_population              = 1000     #population size during epoch
     num_changes_per_mutation    = 2        #number of controlpoint changes during a mutation
@@ -246,8 +247,12 @@ def main():
     #x,y = opt.get_manual_initial_centerline()
 
     #minden city speedway initial trajectory
-    x = [167, 191, 212, 243, 273, 302, 319, 328, 329, 321, 311, 296, 279, 263, 246, 233, 226, 213, 197, 186, 183, 184, 193, 203, 209, 199, 185, 165, 139, 115, 98, 81, 77, 83, 96, 110, 117, 118, 111, 109, 117, 130, 146]
-    y = [28, 27, 24, 22, 21, 23, 40, 61, 85, 104, 122, 128, 131, 128, 122, 106, 78, 68, 68, 79, 88, 101, 111, 125, 143, 154, 158, 157, 157, 155, 154, 144, 130, 114, 105, 93, 79, 65, 53, 39, 30, 25, 24, 28]
+    #x = [167, 191, 212, 243, 273, 302, 319, 328, 329, 321, 311, 296, 279, 263, 246, 233, 226, 213, 197, 186, 183, 184, 193, 203, 209, 199, 185, 165, 139, 115, 98, 81, 77, 83, 96, 110, 117, 118, 111, 109, 117, 130, 146]
+    #y = [28, 27, 24, 22, 21, 23, 40, 61, 85, 104, 122, 128, 131, 128, 122, 106, 78, 68, 68, 79, 88, 101, 111, 125, 143, 154, 158, 157, 157, 155, 154, 144, 130, 114, 105, 93, 79, 65, 53, 39, 30, 25, 24, 28]
+
+    x = [189, 218, 251, 272, 291, 306, 317, 321, 321, 317, 311, 298, 279, 262, 250, 243, 235, 228, 215, 198, 189, 187, 190, 199, 205, 205, 195, 178, 159, 140, 122, 101, 84, 75, 77, 90, 102, 110, 114, 111, 110, 111, 120, 139, 162]
+    y = [24, 22, 19, 17, 18, 21, 33, 51, 84, 108, 126, 136, 137, 129, 117, 105, 91, 79, 70, 69, 77, 90, 102, 110, 124, 139, 148, 151, 152, 153, 155, 155, 154, 142, 127, 114, 106, 96, 82, 68, 57, 45, 36, 30, 26]
+
 
     """#max_change_per_point_meters must be smaller than half desired_points_per_meter
     if desired_points_per_meter/2 < (max_change_per_point_meters+0.1):
@@ -267,7 +272,7 @@ def main():
     #resample spline with desired number of control points:
     x,y, _, _, path_len = pyspline.calc_2d_spline_interpolation(x, y, num=num_ctrl_points)
 
-    vd = VehicleDescription(haftreibung, vehicle_width_m, vehicle_acceleration_mss, vehicle_deceleration_mss)
+    vd = VehicleDescription(haftreibung, vehicle_width_m,  vehicle_mass_kg, vehicle_acceleration_mss, vehicle_deceleration_mss)
     original = Trajectory(x, y, vd, opt.get_config()["resolution"])
 
     #use genetic algorithm to optimize x,y

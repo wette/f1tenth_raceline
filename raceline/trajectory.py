@@ -5,9 +5,11 @@ import numpy
 
 class VehicleDescription:
     def __init__(self, haftreibung: float, vehicle_width_m: float, 
+                 vehicle_mass: float,
                  vehicle_acceleration_mss: float, vehicle_deceleration_mss: float,):
         self.haftreibung = haftreibung
         self.vehicle_width_m = vehicle_width_m
+        self.vehicle_mass = vehicle_mass
         self.vehicle_acceleration_mss = vehicle_acceleration_mss
         self.vehicle_deceleration_mss = vehicle_deceleration_mss
 
@@ -16,6 +18,7 @@ class Trajectory:
         self.x = x
         self.y = y
         self.haftreibung = vehicle_description.haftreibung
+        self.vehicle_mass = vehicle_description.vehicle_mass
         self.curvature = curvature
         self.vehicle_width_m = vehicle_description.vehicle_width_m
         self.vehicle_acceleration_mss = vehicle_description.vehicle_acceleration_mss
@@ -41,7 +44,7 @@ class Trajectory:
         #self.x, self.y, _, self.curvature, _ = pyspline.calc_2d_spline_interpolation(self.x, self.y, num=len(self.y))
 
     def get_vehicle_description(self):
-        return VehicleDescription(self.haftreibung, self.vehicle_width_m, self.vehicle_acceleration_mss, self.vehicle_deceleration_mss)
+        return VehicleDescription(self.haftreibung, self.vehicle_width_m, self.vehicle_mass, self.vehicle_acceleration_mss, self.vehicle_deceleration_mss)
 
     def remove_overlapping_points(self, leave_in_cycle=True):
         """remove points at the end of the spline that overlap with points at the beginning at the spline."""
@@ -112,12 +115,14 @@ class Trajectory:
 
     def compute_velocity_profile(self):
         """for each point on the spline, compute the max. possible velocity given a certain traction"""
-        #formula taken from https://www.johannes-strommer.com/fahrzeug-formeln/geschwindigkeit-in-kurven/
 
-        #This assumes infinite acceleration/deceleration and gives us the max. possible cornering speeds.
+        # This assumes infinite acceleration/deceleration and gives us the max. possible cornering speeds
+        # by computing the antipetal force and letting it always beeing smaller (or equal) to the lateral 
+        # force of the tire
         self.velocity_profile = []
         for i in range(0, len(self.x)):
-            max_velocity = math.sqrt(self.haftreibung/(1.0-self.haftreibung) * 9.8 * 1.0/max(abs(self.curvature[i]), 0.0001))
+            radius_m = 1.0/max(abs(self.curvature[i]), 0.0001) * self.resolution
+            max_velocity = math.sqrt((self.haftreibung * radius_m) / self.vehicle_mass ) #antipetal force
             self.velocity_profile.append(max_velocity)
 
         #as first and last point have curv. = 0, max velocity does not make sense there
