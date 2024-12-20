@@ -82,8 +82,7 @@ class PurePursuit(Node):
 
 
         #raceline
-        #TODO: Trajectroy constructor w/o arguments...
-        vd = VehicleDescription(haftreibung=0.0, vehicle_width_m=0.0, vehicle_acceleration_mss=0.0, vehicle_deceleration_mss=0.0)
+        vd = VehicleDescription()
         self.raceline = Trajectory(x=[0, 1, 2], y=[0, 1, 2], vehicle_description=vd, resolution=0)
         #TODO: file path from configuration or command line
 
@@ -164,7 +163,7 @@ class PurePursuit(Node):
         except Exception as e:
             print(e)
 
-    def transformPoint(self, x:float, y:float, from_frame: str, target_frame:str) -> (float, float):
+    def transformPoint(self, x:float, y:float, from_frame: str, target_frame:str) -> tuple[float, float]:
         point_in_map = PoseStamped()
         point_in_map.pose.position.x = x
         point_in_map.pose.position.y = y

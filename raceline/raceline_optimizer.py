@@ -36,9 +36,9 @@ class RacelineOptimizer:
     def debug_draw_trajectory(self, trajectory : Trajectory, filename: str = None, title: str = None):
         pyplot.imshow(self.__map.get_pixel_map())
 
-        lx,ly, _, _, _ = pyspline.calc_2d_spline_interpolation(trajectory.x + trajectory.x[1:2], trajectory.y + trajectory.y[1:2], num=300)
+        lx,ly, _, curvature, _ = pyspline.calc_2d_spline_interpolation(trajectory.x + trajectory.x[1:2], trajectory.y + trajectory.y[1:2], num=300)
 
-        rl = Trajectory(lx, ly, trajectory.get_vehicle_description(), trajectory.resolution)
+        rl = Trajectory(lx, ly, trajectory.get_vehicle_description(), trajectory.resolution, curvature=curvature)
         rl.do_forwards_pass = True
         rl.compute_velocity_profile()
         #print(f"Raceline with 300 points time: {rl.get_laptime()}")
@@ -235,7 +235,7 @@ def main():
     desired_points_per_meter    = 1.0      #how many control points to use during optimization per spline (you want as few as possible!)
     max_change_per_point_meters = 0.5      #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
 
-    num_epochs                  = 100       #number of optimization epochs
+    num_epochs                  = 25       #number of optimization epochs
     num_keep                    = 50      #number of trajectories to keep after each epoch
     num_population              = 1000     #population size during epoch
     num_changes_per_mutation    = 2        #number of controlpoint changes during a mutation

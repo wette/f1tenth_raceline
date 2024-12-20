@@ -1,5 +1,6 @@
 from trajectory import Trajectory
 import pycubicspline.pycubicspline as pyspline
+import math
 
 class Map:
     def __init__(self, image_file: str, origin: list, resolution: float):
@@ -49,7 +50,23 @@ class Map:
             f.write(f"{x}\t{y}\t{trajectory.velocity_profile[i]}\n")
 
         f.close()
-        
+    
+    # returns index, on which the trajectory collides with the map. -1 if no collision
+    def collision_at(self, trajectory: Trajectory, vehicle_width_in_map_pixels: int):
+        for i in range(len(trajectory.x)):
+            #check if a square around each point of the trajectory is all in free space
+            #TODO: This should actually be a circle!
+            
+            if self.__map[int(trajectory.y[i])][int(trajectory.x[i])] > 0.0:
+                #print(f"Point {i} not in free space: {int(lx[i])},{int(ly[i])}")
+                return i
+            for dx in range(-math.floor(vehicle_width_in_map_pixels/2.0), math.ceil(vehicle_width_in_map_pixels/2.0), 1):
+                for dy in range(-math.floor(vehicle_width_in_map_pixels/2.0), math.ceil(vehicle_width_in_map_pixels/2.0), 1):
+                    if self.__map[int(trajectory.y[i]+dy)][int(trajectory.x[i]+dx)] > 0.0:
+                        #print(f"Point {i} not in free space: {int(ly[i]+dy)},{int(lx[i]+dx)}")
+                        return i
+
+        return -1
 
     #override []-operator
     def __getitem__(self, key):
