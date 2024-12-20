@@ -228,9 +228,12 @@ def main():
     haftreibung                 = 5.0   #kg force to move standing vehicle in lateral direction
     vehicle_mass_kg             = 3.0
     vehicle_width_m             = 0.6#0.3      #half width is minimum distance to any wall at any time
+    vehicle_length_m            = 0.5
     vehicle_acceleration_mss    = 7.0     #vehicle acceleration in meters/sec/sec
     vehicle_deceleration_mss    = 3.0     #vehicle deceleration in meters/sec/sec
     turning_radius_m            = 1.2/2.0 #1.0/2.0      #turning radius of the vehicle in meters
+    min_steering_angle_deg      = -25
+    max_steering_angle_deg      = 25
 
     desired_points_per_meter    = 1.0      #how many control points to use during optimization per spline (you want as few as possible!)
     max_change_per_point_meters = 0.5      #how much change to a controlpoint per iteration in meters (should be pretty small; few cm)
@@ -272,7 +275,7 @@ def main():
     #resample spline with desired number of control points:
     x,y, _, _, path_len = pyspline.calc_2d_spline_interpolation(x, y, num=num_ctrl_points)
 
-    vd = VehicleDescription(haftreibung, vehicle_width_m,  vehicle_mass_kg, vehicle_acceleration_mss, vehicle_deceleration_mss)
+    vd = VehicleDescription(haftreibung, vehicle_width_m,  vehicle_mass_kg, vehicle_acceleration_mss, vehicle_deceleration_mss, vehicle_length_m, min_steering_angle_deg, max_steering_angle_deg)
     original = Trajectory(x, y, vd, opt.get_config()["resolution"])
 
     #use genetic algorithm to optimize x,y
