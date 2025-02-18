@@ -1,10 +1,22 @@
 from trajectory import Trajectory
 import pycubicspline.pycubicspline as pyspline
 import math
+import copy
+import numpy as np
 
 class Map:
     def __init__(self, image_file: str, origin: list, resolution: float):
-        self.__map = self.parse_image(image_file)
+        self.__map = None
+        self.__origin_x = None
+        self.__origin_y = None
+        self.__origin = None
+        self.__resolution = None
+
+        if image_file is None or origin is None or resolution is None:
+            return
+        
+        self.__map = np.array(self.parse_image(image_file))
+        
 
         self.__origin_x = int(origin[0] / resolution * -1.0)
         self.__origin_y = int(origin[1] / resolution * -1.0)
@@ -14,6 +26,16 @@ class Map:
 
         self.binarize_image()
         #self.region_growing()
+
+    def copy(self):
+        c = Map(None, None, None)
+        c.__map = copy.deepcopy(self.__map)
+        c.__origin_x = self.__origin_x
+        c.__origin_y = self.__origin_y
+        c.__origin = self.__origin
+        c.__resolution = self.__resolution
+
+        return c
 
     def get_origin(self):
         return self.__origin
@@ -43,7 +65,6 @@ class Map:
             y_px = trajectory.y[i]
 
             #transform pixel to coordinates
-            #TODO: Check if x and y should be swapped around!
             x = x_px * self.__resolution + self.__origin[0]
             y = y_px * self.__resolution + self.__origin[1]
 
@@ -53,7 +74,7 @@ class Map:
     
     # returns index, on which the trajectory collides with the map. -1 if no collision
     def collision_at(self, trajectory: Trajectory, vehicle_width_in_map_pixels: int):
-        for i in range(len(trajectory.x)):
+        for i in range(0, len(trajectory.x), 3):
             #check if a square around each point of the trajectory is all in free space
             #TODO: This should actually be a circle!
             

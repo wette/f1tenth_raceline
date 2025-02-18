@@ -14,17 +14,21 @@ setup(
         ('lib/' + package_name, [package_name+'/pid_controller.py']),
         ('lib/' + package_name, [package_name+'/laserscan_filter.py']),
         ('lib/' + package_name, [package_name+'/pure_pursuit.py']),
+        ('lib/' + package_name, [package_name+'/mpcController.py']),
+        ('lib/' + package_name, [package_name+'/MPCNode.py']),
+        ('lib/' + package_name, [package_name+'/map.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='Philip Wette',
     maintainer_email='philip.wette@hsbi.de',
-    description='Pure Pursuit raceline following car',
+    description='Raceline following car',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'pure_pursuit = raceline.pure_pursuit:main',
+            'mpc = raceline.MPCNode:main',
         ],
     },
 )

@@ -225,7 +225,7 @@ class RacelineOptimizer:
     
 
 def main():
-    haftreibung                 = 5.0   #kg force to move standing vehicle in lateral direction
+    haftreibung                 = 6.0   #kg force to move standing vehicle in lateral direction
     vehicle_mass_kg             = 3.0
     vehicle_width_m             = 0.6#0.3      #half width is minimum distance to any wall at any time
     vehicle_length_m            = 0.5
