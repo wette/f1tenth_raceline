@@ -74,16 +74,17 @@ class Map:
     
     # returns index, on which the trajectory collides with the map. -1 if no collision
     def collision_at(self, trajectory: Trajectory, vehicle_width_in_map_pixels: int):
+        maxy, maxx = self.get_map_size_pixels()
         for i in range(0, len(trajectory.x), 3):
             #check if a square around each point of the trajectory is all in free space
             #TODO: This should actually be a circle!
             
-            if self.__map[int(trajectory.y[i])][int(trajectory.x[i])] > 0.0:
+            if self.__map[min(maxy-1, int(trajectory.y[i]))][min(maxx-1, int(trajectory.x[i]))] > 0.0:
                 #print(f"Point {i} not in free space: {int(lx[i])},{int(ly[i])}")
                 return i
             for dx in range(-math.floor(vehicle_width_in_map_pixels/2.0), math.ceil(vehicle_width_in_map_pixels/2.0), 1):
                 for dy in range(-math.floor(vehicle_width_in_map_pixels/2.0), math.ceil(vehicle_width_in_map_pixels/2.0), 1):
-                    if self.__map[int(trajectory.y[i]+dy)][int(trajectory.x[i]+dx)] > 0.0:
+                    if self.__map[min(maxy-1, int(trajectory.y[i]+dy))][min(maxx-1,int(trajectory.x[i]+dx))] > 0.0:
                         #print(f"Point {i} not in free space: {int(ly[i]+dy)},{int(lx[i]+dx)}")
                         return i
 

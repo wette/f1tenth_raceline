@@ -106,7 +106,7 @@ class Trajectory:
             xd = self.x[i-1] - self.x[i]
             yd = self.y[i-1] - self.y[i]
             way = math.sqrt(xd*xd+yd*yd)*self.resolution #distance from last to this waypoint (m)
-            time = way/velocity # (s)
+            time = way/max(velocity, 0.0001) # (s)
             if self.velocity_profile[(i-1) % len(self.velocity_profile)]-self.vehicle_deceleration_mss*time > self.velocity_profile[i]:
                 self.velocity_profile[(i-1) % len(self.velocity_profile)] = self.velocity_profile[i]+self.vehicle_deceleration_mss*time
                 i = (i - 1) % len(self.velocity_profile)
@@ -263,13 +263,15 @@ class Trajectory:
                 return 0.0 #externally feed index is out of bounds.
             x = self.x[idx]
             y = self.y[idx]
+
             #test different changes - keep the first one which is in free space
+            dimy, dimx = map.get_map_size_pixels()
             while True:
                 normalx, normaly = self.compute_random_vector() if use_normal_vector == False else self.compute_normal_vector(idx)
                 change = random.random()*max_change_px
 
-                self.x[idx] = x + change*normalx
-                self.y[idx] = y + change*normaly
+                self.x[idx] = min(x + change*normalx, dimx-1)
+                self.y[idx] = min(y + change*normaly, dimy-1)
                 
                 if map[ int(self.y[idx]) ][ int(self.x[idx]) ] == 0.0:
                     #if first point of the trajectory is moved, the last point needs to move, too! (otherwise it wouldn't be a circle anymore)
