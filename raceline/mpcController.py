@@ -10,8 +10,7 @@ import time
 from map import Map
 from trajectory import Trajectory, VehicleDescription
 from matplotlib import pyplot
-
-
+from pid_controller import PIDController
 
 class MPCController():
     def __init__(self, mapconfigfile: str, raceline: str, vehicle_description: VehicleDescription, 
@@ -29,7 +28,7 @@ class MPCController():
         #map which is joined static map and dynamic laser observations
         self.__map = self.__static_map.copy() #no laser observations, yet.
 
-
+        self.steering_pid_controller = PIDController(kp=0.8, ki=0.2, kd=0.0, history_length=20)
 
         self.__lookahead_m = lookahead_m
         self.__points_per_meter = points_per_meter
@@ -111,11 +110,11 @@ class MPCController():
         
         start = time.time()
         #transform laser message into pixel map:
-        self.__map = self.__static_map.copy()
+        mapCopy = self.__static_map.copy()
 
-        resolution = self.__map.get_resolution()
+        resolution = mapCopy.get_resolution()
 
-        pxmap = self.__map.get_pixel_map()
+        pxmap = mapCopy.get_pixel_map()
 
         maxy = len(pxmap)
         maxx = len(pxmap[0])
@@ -141,10 +140,12 @@ class MPCController():
                 pxmap[y][x] = 1.0
 
         end = time.time()
-        #print(end-start)
+        #print(end-start, flush=True)
         #print("veh pos: ", x_vehicle_map, y_vehicle_map, flush=True)
         #pyplot.imshow(self.__map.get_pixel_map())
         #pyplot.show()
+
+        self.__map = mapCopy
 
     
     def parse_config(self, filename: str):
@@ -360,54 +361,10 @@ class MPCController():
         """
         #try to repair trajectory if we have a collision:
         if collision_index >= 0:
-            count = 0
-            max_tries = self.__candidate_count
-            use_normal_vector = True
+            self.resolve_collisions(collision_index, num_samples, vehicle_width_in_map_pixels)
 
-            smallestChange = 10000
-            smallestCoarse, smallestFine = None, None
-            while count < max_tries:
-
-                if count > max_tries/2:
-                    use_normal_vector = False
-                #random changes to the coarse trajectory:
-                t1 = time.time()
-                c = Trajectory(self.__current_trajectory_coarse.x.copy(), self.__current_trajectory_coarse.y.copy(), self.__vehicle_description, self.__config["resolution"], is_a_loop=False, leave_as_is=True)
-                t2  = time.time()
-                change = c.random_changes(max_change_px=1.0/self.__config["resolution"],
-                                            num_changes=1,
-                                            map=self.__map,
-                                            num_ctrl_points=num_samples,
-                                            apply_smoothing=False,
-                                            idx=int(collision_index/(len(self.__current_trajectory_fine.x)/len(self.__current_trajectory_coarse.x))),
-                                            use_normal_vector=use_normal_vector,
-                                            num_adjacent=1)
-                t3  = time.time()
-                #construct fine trajectory from coarse:
-                f, collision_index = self.__trajectory_from_controlpoints(c.x, c.y, num_samples, vehicle_width_in_map_pixels)
-                t4 = time.time()
-                #collision_index = self.__map.collision_at(f, vehicle_width_in_map_pixels)
-                t5 = time.time()
-
-                dt1 = (t2-t1)*1000.0
-                dt2 = (t3-t2)*1000.0
-                dt3 = (t4-t3)*1000.0
-                dt4 = (t5-t4)*1000.0
-                #print(dt1, dt2, dt3, dt4)
-
-                if collision_index < 0 and change < smallestChange:
-                    smallestChange = change
-                    smallestCoarse = c
-                    smallestFine = f
-
-                count += 1
-
-            if smallestFine is not None:
-                self.__current_trajectory_fine = smallestFine
-                self.__current_trajectory_coarse = smallestCoarse
-
-        if collision_index >= 0:
-            return 0,0
+        #if collision_index >= 0:
+        #    return 0,0
         
 
         #try to optimize current trajectory:
@@ -439,6 +396,60 @@ class MPCController():
 
         
         """
+
+        return self.get_control_input_from_trajectory(x_vehicle_map, y_vehicle_map, vehicle_speed, vehicle_yaw, delta_t)
+    
+
+
+    def resolve_collisions(self, collision_index, num_samples, vehicle_width_in_map_pixels):
+        print("resolving collisions...", flush=True)
+        count = 0
+        max_tries = self.__candidate_count
+        use_normal_vector = True
+
+        smallestChange = 10000
+        smallestCoarse, smallestFine = None, None
+        while count < max_tries:
+
+            if count > max_tries/2:
+                use_normal_vector = False
+            #random changes to the coarse trajectory:
+            t1 = time.time()
+            c = Trajectory(self.__current_trajectory_coarse.x.copy(), self.__current_trajectory_coarse.y.copy(), self.__vehicle_description, self.__config["resolution"], is_a_loop=False, leave_as_is=True)
+            t2  = time.time()
+            change = c.random_changes(max_change_px=1.0/self.__config["resolution"],
+                                        num_changes=1,
+                                        map=self.__map,
+                                        num_ctrl_points=num_samples,
+                                        apply_smoothing=False,
+                                        idx=int(collision_index/(len(self.__current_trajectory_fine.x)/len(self.__current_trajectory_coarse.x))),
+                                        use_normal_vector=use_normal_vector,
+                                        num_adjacent=1)
+            t3  = time.time()
+            #construct fine trajectory from coarse:
+            f, collision_index = self.__trajectory_from_controlpoints(c.x, c.y, num_samples, vehicle_width_in_map_pixels)
+            t4 = time.time()
+            #collision_index = self.__map.collision_at(f, vehicle_width_in_map_pixels)
+            t5 = time.time()
+
+            dt1 = (t2-t1)*1000.0
+            dt2 = (t3-t2)*1000.0
+            dt3 = (t4-t3)*1000.0
+            dt4 = (t5-t4)*1000.0
+            #print(dt1, dt2, dt3, dt4)
+
+            if collision_index < 0 and change < smallestChange:
+                smallestChange = change
+                smallestCoarse = c
+                smallestFine = f
+
+            count += 1
+
+        if smallestFine is not None:
+            self.__current_trajectory_fine = smallestFine
+            self.__current_trajectory_coarse = smallestCoarse
+
+    def get_control_input_from_trajectory(self, x_vehicle_map, y_vehicle_map, vehicle_speed, vehicle_yaw, delta_t):
         s = self.__current_trajectory_fine
         #compute velocities
         s.compute_velocity_profile()
@@ -495,6 +506,9 @@ class MPCController():
     
         input_angle = min(max(input_angle, self.__vehicle_description.vehicle_min_steering_angle), self.__vehicle_description.vehicle_max_steering_angle)
         angle = math.radians(input_angle)
+
+        #filter angle
+        angle = self.steering_pid_controller.update(angle)
 
         #make sure we are not too fast to turn:
         radius_m = 10000

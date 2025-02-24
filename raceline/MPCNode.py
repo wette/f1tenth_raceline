@@ -8,7 +8,7 @@ import time
 import random
 
 import rclpy
-from rclpy.executors import MultiThreadedExecutor
+
 
 import copy
 from rclpy.node import Node
@@ -40,6 +40,7 @@ from trajectory import VehicleDescription
 from mpcController import MPCController
 
 
+
 TOPIC_DRIVE = "/drive"
 TOPIC_LASERSCAN = "/scan"
 TOPIC_ODOMETRY = "/odom"
@@ -69,22 +70,14 @@ class MPCNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        #create listeners
-        self.sub_laser = self.create_subscription(LaserScan, TOPIC_LASERSCAN, self.cb_new_laserscan, 1)
-        self.sub_laser  # prevent unused variable warning
-
-        self.sub_odom     = self.create_subscription(Odometry, TOPIC_ODOMETRY, self.callback_on_odom, 1)
-        self.sub_odom   # prevent unused variable warning
+        
 
         self.vehicle_update_rate = vehicle_update_rate #updates are sent to the vehicle with 30Hz
 
         self.map_frame_name     = "map"
         self.vehicle_frame_name = "ego_racecar/base_link"
 
-        self.create_timer(1.0, self.debug_publish_raceline)
-        self.create_timer(1.0/self.vehicle_update_rate, self.dodrive)
-
-        self.create_timer(5.0, self.debug_print_rate)
+        
         self.numExecutions = 0
 
         self.vehicle_current_velocity = 0.0
@@ -116,6 +109,20 @@ class MPCNode(Node):
                                 points_per_meter=points_per_meter)
         
         self.raceline = None
+
+
+        #create listeners
+        self.sub_laser = self.create_subscription(LaserScan, TOPIC_LASERSCAN, self.cb_new_laserscan, 1)
+        self.sub_laser  # prevent unused variable warning
+
+        self.sub_odom     = self.create_subscription(Odometry, TOPIC_ODOMETRY, self.callback_on_odom, 1)
+        self.sub_odom   # prevent unused variable warning
+
+        #create timers
+        self.create_timer(1.0,                          self.debug_publish_raceline)
+        self.create_timer(1.0/self.vehicle_update_rate, self.dodrive)
+        self.create_timer(5.0,                          self.debug_print_rate)
+        
 
     def debug_print_rate(self):
         print(f"Control loop execution rate: {self.numExecutions/5.0}Hz", flush=True)
@@ -157,10 +164,6 @@ class MPCNode(Node):
     def dodrive(self):
         self.drive()
         return
-        try:
-            self.drive()
-        except Exception as e:
-            print(e)
 
     def get_vehicle_position(self, time=None):
         
@@ -278,7 +281,6 @@ def main(args=None):
 
     mpc = MPCNode()
 
-    
     rclpy.spin(mpc)
 
 
