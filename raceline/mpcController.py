@@ -41,10 +41,12 @@ class MPCController():
         self.__last_added_raceline_point = None
 
         #raceline
+        print(f"loading raceline from {raceline}...", flush=True)
         self.raceline = Trajectory(x=[0, 1, 2], y=[0, 1, 2], vehicle_description=vehicle_description, resolution=0, leave_in_cycle=True)
         self.raceline.load_trajectory_from_file(raceline) #meters - not pixels!
 
         #transform map from meters (and some origin) into pixels with origin (0,0)
+        print(f"transforming raceline with {len(self.raceline.x)} points...", flush=True)
         max_x, max_y = self.__map.get_map_size_pixels()
         resolution = self.__map.get_resolution()
         origin = self.__map.get_origin()
@@ -57,9 +59,11 @@ class MPCController():
             self.raceline.y[i] = (max_x - y_px)  + origin[1] / resolution    #TODO: Shouldn't this be max_y? Somewhere down the line x and y seem to be swapped by mistake!
 
         #extract controlpoints from raceline (every 0.25 meters):
+        print(f"resampling raceline to {int(self.raceline.get_length() * self.__config['resolution']*1)} points...", flush=True)
         self.controlpoints_raceline_x,self.controlpoints_raceline_y, _, _, _ = pyspline.calc_2d_spline_interpolation(self.raceline.x, 
                                                                                                                      self.raceline.y, 
                                                                                                                      num=int(self.raceline.get_length() * self.__config["resolution"]*1))
+                                                                                                                     
 
         self.__vehicle_description = vehicle_description
         
@@ -70,7 +74,9 @@ class MPCController():
         self.vehicle_y = None
         self.vehicle_yaw = None
 
-    def get_fine_trajectory(self, numEntries=10):
+        print(f"ready.", flush=True)
+
+    def get_fine_trajectory_meters(self, numEntries=10):
         if self.__current_trajectory_fine is None:
             return None
         
@@ -81,21 +87,39 @@ class MPCController():
         if raceline.velocity_profile is not None:
             raceline.velocity_profile = raceline.velocity_profile[0:numEntries]
 
+
         #transform from pixel space to meters
         origin = self.__map.get_origin()
-        max_x, max_y = self.__map.get_map_size_pixels()
+        max_y, max_x = self.__map.get_map_size_pixels()
         for i in range(len(raceline.x)):
             x_px = raceline.x[i]
             y_px = raceline.y[i]
 
             #transform pixel to coordinates - y axis needs to be swapped around!
             raceline.x[i] = x_px * self.__map.get_resolution() + origin[0]
-            raceline.y[i] = (max_x - y_px) * self.__map.get_resolution() + origin[1]   #TODO: Shouldn't this be max_y? Somewhere down the line x and y seem to be swapped by mistake!
+            raceline.y[i] = (max_y - y_px) * self.__map.get_resolution() + origin[1]
 
 
 
         return raceline
     
+    def get_fine_trajectory_pixels(self, numEntries=10):
+        return self.__current_trajectory_fine
+    
+        if self.__current_trajectory_fine is None:
+            return None
+        
+        raceline = self.__current_trajectory_fine.copy()
+
+        raceline.x = raceline.x[0:numEntries]
+        raceline.y = raceline.y[0:numEntries]
+        if raceline.velocity_profile is not None:
+            raceline.velocity_profile = raceline.velocity_profile[0:numEntries]
+
+
+        return raceline
+    
+
 
     def callback_new_laser(self, msg, x_vehicle_map_m, y_vehicle_map_m, yaw_vehicle_map):
         #remove offset from vehicle pos
@@ -233,12 +257,103 @@ class MPCController():
         return self.vehicle_x, self.vehicle_y, self.vehicle_yaw
 
 
+    # updates internal fine trajectory with current vehicle position and computes driving commands
+    # DOES NOT REPAIR trajectorx in case of any obstacles.
     def compute_next_command(self, x_vehicle_map_m, y_vehicle_map_m, vehicle_yaw, vehicle_speed, delta_t):
+        
+        if self.__current_trajectory_fine is None or len(self.__current_trajectory_fine.x) < 3:
+            return None, None
 
         #print(f"compute_next_command(self, {x_vehicle_map_m}, {y_vehicle_map_m}, {vehicle_yaw}, {vehicle_speed}, {delta_t})", flush=True)
 
         #internally, we compute everything in pixels - hence, we first need to convert from meters to pixels
 
+        #convert from meters to pixels
+        x_vehicle_map, y_vehicle_map = self.convert_from_meters_to_pixels(x_vehicle_map_m, y_vehicle_map_m)
+
+        #initialize vehicle parameters, if called for the first time:
+        if self.vehicle_x is None:
+            self.vehicle_x = x_vehicle_map
+            self.vehicle_y = y_vehicle_map
+            self.vehicle_yaw = vehicle_yaw
+
+
+        #consider internal model for position smoothing
+        #x_vehicle_map, y_vehicle_map, vehicle_yaw = self.get_vehicle_pose(x_vehicle_map, y_vehicle_map, vehicle_yaw)
+        
+        #update fine trajectory to reflect vehicle position:
+        index_on_fine_trajectory = self.compute_index_on_trajectory(self.__current_trajectory_fine, x_vehicle_map, y_vehicle_map, False, startIndex=0)
+        #print(self.FigCounter, index_on_fine_trajectory, x_vehicle_map, y_vehicle_map, flush=True)
+        #print(self.__current_trajectory_fine.x)
+        #print(self.__current_trajectory_fine.y)
+        if index_on_fine_trajectory >= len(self.__current_trajectory_fine.x)-1:
+            print(f"error: current index of fine trajectory: {index_on_fine_trajectory} / {len(self.__current_trajectory_fine.x)}", flush=True)
+            return None, None
+
+        self.__current_trajectory_fine.x = self.__current_trajectory_fine.x[index_on_fine_trajectory:]
+        self.__current_trajectory_fine.y = self.__current_trajectory_fine.y[index_on_fine_trajectory:]
+        #self.__current_trajectory_fine.x[0] = x_vehicle_map
+        #self.__current_trajectory_fine.y[0] = y_vehicle_map
+
+
+
+
+        s = self.__current_trajectory_fine
+        #compute velocities
+        s.compute_velocity_profile()
+        s.velocity_profile[0] = vehicle_speed
+        s.adjust_velocity_to_acceleration_forwards_pass(0)
+        s.adjust_velocity_to_acceleration_backwards_pass(1)
+        
+        
+        #get steering angle from trajectory
+        target_index = 2    #we try heading towards the 2nd point of the fine trajectory
+        input_angle = 1000
+        angle = 0.0
+
+        #if vehicle speed is high, it might help to aim for further away points to stabelize the trajectory:
+        if vehicle_speed > 3.0:
+            target_index = min( int(vehicle_speed*2), len(s.x)-1)
+
+
+
+            
+        dx = s.x[target_index % len(s.x)] - x_vehicle_map
+        dy = s.y[target_index % len(s.x)] - y_vehicle_map
+        l = math.sqrt(dx**2 + dy**2)
+        angle = vehicle_yaw
+        if l != 0.0:
+            angle = math.atan2(dy/l, dx/l) - vehicle_yaw #TODO: this is wrong as we dont consider vehicle length
+            #angle = 2*dy/(l**2)
+        
+
+        #print(f"angle to s({target_index}) is {math.degrees(angle)}", flush=True)
+        
+        #unwind angle into input_angle
+        input_angle = math.degrees(angle) % 360
+        while input_angle < -180:
+            input_angle += 360
+        while input_angle > 180:
+            input_angle -= 360
+
+    
+        input_angle = min(max(input_angle, self.__vehicle_description.vehicle_min_steering_angle), self.__vehicle_description.vehicle_max_steering_angle)
+        angle = math.radians(input_angle)
+
+        #make sure we are not too fast to turn:
+        radius_m = 10000
+        if angle != 0:
+            radius_m = abs(s.get_vehicle_description().vehicle_length_m / math.sin(angle))
+        max_velocity_possible = math.sqrt((s.get_vehicle_description().haftreibung * radius_m) / s.get_vehicle_description().vehicle_mass ) #due to antipetal force
+
+        desired_speed = min(s.velocity_profile[target_index], max_velocity_possible)
+
+        self.update_internal_vehicle_model(speed=desired_speed, yaw_deg=math.degrees(angle), delta_t=delta_t)
+
+        return desired_speed, math.degrees(angle)
+    
+
+    def convert_from_meters_to_pixels(self, x_vehicle_map_m, y_vehicle_map_m):
         #remove offset from vehicle pos
         origin = self.__map.get_origin()
         x_vehicle_map_m, y_vehicle_map_m = x_vehicle_map_m - origin[0], y_vehicle_map_m - origin[1]
@@ -249,6 +364,29 @@ class MPCController():
         #swap y-axis
         max_y = self.__map.get_map_size_pixels()[0]
         y_vehicle_map = (max_y - y_vehicle_map)
+
+        return x_vehicle_map, y_vehicle_map
+    
+
+    def set_fine_trajectory(self, xs, ys, curvature, velocities):
+        #convert from meters to pixels
+
+        self.__current_trajectory_fine = Trajectory(xs, ys, self.__vehicle_description, self.__config["resolution"], curvature=curvature, is_a_loop=False, leave_as_is=True)
+        if velocities is not None:
+            self.__current_trajectory_fine.velocity_profile = velocities
+        
+        
+
+    # repaires current trajectory in case of a future collision
+    def trajectory_collision_resolution(self, x_vehicle_map_m, y_vehicle_map_m, vehicle_yaw, vehicle_speed, delta_t):
+
+        #print(f"compute_next_command(self, {x_vehicle_map_m}, {y_vehicle_map_m}, {vehicle_yaw}, {vehicle_speed}, {delta_t})", flush=True)
+
+        #internally, we compute everything in pixels - hence, we first need to convert from meters to pixels
+
+        #convert from meters to pixels
+        x_vehicle_map, y_vehicle_map = self.convert_from_meters_to_pixels(x_vehicle_map_m, y_vehicle_map_m)
+
 
         #initialize vehicle parameters, if called for the first time:
         if self.vehicle_x is None:
@@ -287,9 +425,9 @@ class MPCController():
 
             self.__last_added_raceline_point = self.compute_index_on_trajectory(
                 Trajectory(self.controlpoints_raceline_x, 
-                           self.controlpoints_raceline_y, 
-                           self.__vehicle_description, 
-                           self.__config["resolution"]),
+                            self.controlpoints_raceline_y, 
+                            self.__vehicle_description, 
+                            self.__config["resolution"]),
                 cx[-1], 
                 cy[-1],
                 False)+2
@@ -329,13 +467,9 @@ class MPCController():
 
         #update fine trajectory to reflect vehicle position:
         index_on_fine_trajectory = self.compute_index_on_trajectory(self.__current_trajectory_fine, x_vehicle_map, y_vehicle_map, False, startIndex=0)
-        #print(self.FigCounter, index_on_fine_trajectory, x_vehicle_map, y_vehicle_map, flush=True)
-        #print(self.__current_trajectory_fine.x)
-        #print(self.__current_trajectory_fine.y)
+
         self.__current_trajectory_fine.x = self.__current_trajectory_fine.x[index_on_fine_trajectory:]
         self.__current_trajectory_fine.y = self.__current_trajectory_fine.y[index_on_fine_trajectory:]
-        #self.__current_trajectory_fine.x[0] = x_vehicle_map
-        #self.__current_trajectory_fine.y[0] = y_vehicle_map
 
 
         #check if we are heading into a collision:
@@ -358,6 +492,7 @@ class MPCController():
             self.FigCounter += 1
             #end debug
         """
+
         #try to repair trajectory if we have a collision:
         if collision_index >= 0:
             count = 0
@@ -406,8 +541,10 @@ class MPCController():
                 self.__current_trajectory_fine = smallestFine
                 self.__current_trajectory_coarse = smallestCoarse
 
+
         if collision_index >= 0:
-            return 0,0
+            #could not repair trajectory.
+            return False
         
 
         #try to optimize current trajectory:
@@ -420,10 +557,10 @@ class MPCController():
         for i in range(0,0): #disable
             c = self.__current_trajectory_coarse.copy()
             c.random_changes(max_change_px=0.25/self.__config["resolution"],
-                                     num_changes=1,
-                                     map=self.__map,
-                                     num_ctrl_points=len(c.x), apply_smoothing=False,
-                                     idx=int(random.random() * (len(c.x) - 5) + 5))
+                                        num_changes=1,
+                                        map=self.__map,
+                                        num_ctrl_points=len(c.x), apply_smoothing=False,
+                                        idx=int(random.random() * (len(c.x) - 5) + 5))
             
             f, collision_index = self.__trajectory_from_controlpoints(c.x, c.y, num_samples, vehicle_width_in_map_pixels)
             if collision_index < 0:
@@ -460,52 +597,9 @@ class MPCController():
         pyplot.close('all')
         self.FigCounter += 1
         """
-        
-        
-        #get steering angle from trajectory
-        target_index = 2    #we try heading towards the 2nd point of the fine trajectory
-        input_angle = 1000
-        angle = 0.0
 
-        #if vehicle speed is high, it might help to aim for further away points to stabelize the trajectory:
-        if vehicle_speed > 3.0:
-            target_index = min(10, len(s.x)-1)
-
-
-
-            
-        dx = s.x[target_index % len(s.x)] - x_vehicle_map
-        dy = s.y[target_index % len(s.x)] - y_vehicle_map
-        l = math.sqrt(dx**2 + dy**2)
-        angle = vehicle_yaw
-        if l != 0.0:
-            angle = math.atan2(dy/l, dx/l) - vehicle_yaw #TODO: this is wrong as we dont consider vehicle length
-            #angle = 2*dy/(l**2)
-        
-
-        #print(f"angle to s({target_index}) is {math.degrees(angle)}", flush=True)
-        
-        #unwind angle into input_angle
-        input_angle = math.degrees(angle) % 360
-        while input_angle < -180:
-            input_angle += 360
-        while input_angle > 180:
-            input_angle -= 360
-
-    
-        input_angle = min(max(input_angle, self.__vehicle_description.vehicle_min_steering_angle), self.__vehicle_description.vehicle_max_steering_angle)
-        angle = math.radians(input_angle)
-
-        #make sure we are not too fast to turn:
-        radius_m = 10000
-        if angle != 0:
-            radius_m = abs(s.get_vehicle_description().vehicle_length_m / math.sin(angle))
-        max_velocity_possible = math.sqrt((s.get_vehicle_description().haftreibung * radius_m) / s.get_vehicle_description().vehicle_mass ) #due to antipetal force
-
-        desired_speed = min(s.velocity_profile[target_index], max_velocity_possible)
-
-        self.update_internal_vehicle_model(speed=desired_speed, yaw_deg=math.degrees(angle), delta_t=delta_t)
-        return desired_speed, math.degrees(angle)
+        #could repair trajectory
+        return True
 
 
 

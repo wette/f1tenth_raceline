@@ -15,7 +15,9 @@ setup(
         ('lib/' + package_name, [package_name+'/laserscan_filter.py']),
         ('lib/' + package_name, [package_name+'/pure_pursuit.py']),
         ('lib/' + package_name, [package_name+'/mpcController.py']),
-        ('lib/' + package_name, [package_name+'/MPCNode.py']),
+        ('lib/' + package_name, [package_name+'/MPCNodeCollisionResolution.py']),
+        ('lib/' + package_name, [package_name+'/MPCNodeWaypointFollower.py']),
+        ('share/' + package_name, [package_name+'/mpc_configuration.yaml']),
         ('lib/' + package_name, [package_name+'/map.py']),
     ],
     install_requires=['setuptools'],
@@ -28,7 +30,8 @@ setup(
     entry_points={
         'console_scripts': [
             'pure_pursuit = raceline.pure_pursuit:main',
-            'mpc = raceline.MPCNode:main',
+            'mpc_collision_resolution = raceline.MPCNodeCollisionResolution:main',
+            'mpc_waypoint_follower = raceline.MPCNodeWaypointFollower:main',
         ],
     },
 )

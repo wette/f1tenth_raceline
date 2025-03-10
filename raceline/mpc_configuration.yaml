@@ -1,0 +1,18 @@
+vehicle_update_rate         : 30.0    # updates are sent to the vehicle with this rate
+collision_resolution_rate   : 20.0    # how often to check for collisions
+lookahead_m                 : 5       # lookahead to prevent collisions
+points_per_meter            : 5       # number of points per meter to follow
+
+map_frame_name              : "map"
+vehicle_frame_name          : "ego_racecar/base_link"
+
+vehicle_length_m            : 0.5 
+haftreibung                 : 6.0     #kg force to move standing vehicle in lateral direction
+vehicle_mass_kg             : 3.0
+vehicle_width_m             : 0.3     #half width is minimum distance to any wall at any time
+vehicle_acceleration_mss    : 7.0     #vehicle acceleration in meters/sec/sec
+vehicle_deceleration_mss    : 3.0     #vehicle deceleration in meters/sec/sec
+vehicle_max_steering_angle  : 30.0    #in degrees
+
+mapconfigfile               : "/home/wette/wette_racecar_ws/MindenCitySpeedway.yaml"
+raceline                    : "/home/wette/wette_racecar_ws/my_map_raceline.csv"
