@@ -8,7 +8,7 @@ from nav_msgs.msg import Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, TransformStamped
 
 from trajectory import Trajectory, VehicleDescription
 from pid_controller import PIDController
@@ -21,6 +21,7 @@ import aesthetic_control_interfaces.srv as ae_srv
 import aesthetic_control_interfaces.msg as ae_msg
 
 from tf2_ros.transform_listener import TransformListener
+from tf2_ros import TransformBroadcaster
 from tf2_ros.buffer import Buffer
 import tf2_geometry_msgs #import required to compute transform!
 
@@ -51,6 +52,9 @@ class PurePursuit(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
+        #send transformations
+        self.tf_broadcaster = TransformBroadcaster(self)
+
         #create listeners
         self.sub_laser = self.create_subscription(LaserScan, TOPIC_LASERSCAN, self.cb_new_laserscan, 1)
         self.sub_laser  # prevent unused variable warning
@@ -70,14 +74,18 @@ class PurePursuit(Node):
         
 
         #parameters to filter the steering signal before its given to the VESC
-        self.pid = PIDController(kp = 1.0, ki = 0.0, kd = 0.0)
+        self.pid = PIDController(kp = 0.8, ki = 0.0, kd = 0.05, history_length=10)
 
         #dimensions of the vehicle
         self.vehicle_width_meters           = 0.28
         self.vehicle_max_steering_angle_deg = 25
 
+        #actuator latency (how long does it take until the hardware reacts to commands sent from ros?)
+        self.actuator_latency_s = 0.12 #120ms estimated hardware latency
+
         #vehicle state
         self.vehicle_current_velocity = 0.0 #in meters per second
+        self.vehicle_current_yaw_rate = 0.0 #in rad  per second
         self.lateral_derivation_history = []
 
 
@@ -86,7 +94,7 @@ class PurePursuit(Node):
         self.raceline = Trajectory(x=[0, 1, 2], y=[0, 1, 2], vehicle_description=vd, resolution=0)
         #TODO: file path from configuration or command line
 
-        self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/minden_raceline.csv")
+        self.raceline.load_trajectory_from_file("/root/wette_racecar_ws/mindenCityRaceway2025_raceline.csv")
 
         self.lateral_derivation_history = []
         self.last_waypoint_update_velocity = None
@@ -95,15 +103,16 @@ class PurePursuit(Node):
         self.localization_covariance = [0.0, 0.0, 0.0] #to be updated by the localization algorithm
 
         self.map_frame_name     = "map"
-        self.vehicle_frame_name = "base_link"
+        self.vehicle_frame_name = "laser"
+        self.vehicle_frame_name_projected = "laser_projected" #will be published by this node
 
         self.max_raceline_speed = max(self.raceline.velocity_profile)
 
         self.lookahead_m = 0.45           #lookahead to find out steering angle
 
-        self.speed_factor = 0.6          #how much of the speed do we want to apply?
-        self.speed_min = 0.6             #minimum speed
-        self.speed_max = 3.3             #maximum speed
+        self.speed_factor = 1.1          #how much of the speed do we want to apply?
+        self.speed_min = 2.0             #minimum speed
+        self.speed_max = 6.0             #maximum speed
 
         self.index_on_raceline = -1      #where on the trajectory are we currently?
 
@@ -116,6 +125,37 @@ class PurePursuit(Node):
 
         self.create_timer(1.0, self.debug_publish_raceline)
         self.create_timer(1.0/30.0, self.dodrive)
+        self.create_timer(1.0/30.0, self.update_projected_position)
+
+    def update_projected_position(self):
+        delta_m = self.actuator_latency_s * self.vehicle_current_velocity 
+
+        #take yaw rate into account
+        yaw_angle = self.actuator_latency_s * self.vehicle_current_yaw_rate / 2.0
+        x = math.cos(yaw_angle) * delta_m
+        y = math.sin(yaw_angle) * delta_m
+
+        t = TransformStamped()
+
+        # Read message content and assign it to
+        # corresponding tf variables
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = self.vehicle_frame_name
+        t.child_frame_id = self.vehicle_frame_name_projected
+
+        t.transform.translation.x = x
+        t.transform.translation.y = y
+        t.transform.translation.z = 0.0
+
+        # for now we assume no ratation
+        t.transform.rotation.x = 1.0
+        t.transform.rotation.y = 0.0
+        t.transform.rotation.z = 0.0
+        t.transform.rotation.w = 0.0
+
+        # Send the transformation
+        self.tf_broadcaster.sendTransform(t)
+
 
     def get_underglow_msg(self, color):
         glow_msg= ae_msg.UnderglowColor()
@@ -124,6 +164,7 @@ class PurePursuit(Node):
 
     def callback_on_odom(self, msg: Odometry):
         self.vehicle_current_velocity = float( math.sqrt( msg.twist.twist.linear.x **2 + msg.twist.twist.linear.y **2) )
+        self.vehicle_current_yaw_rate = msg.twist.twist.angular.z
 
     def debug_publish_raceline(self):
         minvel = min(self.raceline.velocity_profile)
@@ -188,7 +229,7 @@ class PurePursuit(Node):
         try:
             t = self.tf_buffer.lookup_transform(
                                         self.map_frame_name,
-                                        self.vehicle_frame_name,
+                                        self.vehicle_frame_name_projected,
                                         rclpy.time.Time())
             x_vehicle_map = t.transform.translation.x
             y_vehicle_map = t.transform.translation.y
