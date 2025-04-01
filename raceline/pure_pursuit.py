@@ -75,13 +75,14 @@ class PurePursuit(Node):
 
         #parameters to filter the steering signal before its given to the VESC
         self.pid = PIDController(kp = 0.8, ki = 0.0, kd = 0.05, history_length=10)
+        self.pid = PIDController(kp = 0.7, ki = 0.0, kd = 0.05, history_length=10)
 
         #dimensions of the vehicle
         self.vehicle_width_meters           = 0.28
         self.vehicle_max_steering_angle_deg = 25
 
         #actuator latency (how long does it take until the hardware reacts to commands sent from ros?)
-        self.actuator_latency_s = 0.12 #120ms estimated hardware latency
+        self.actuator_latency_s = 0.12 #0.12 #120ms estimated hardware latency
 
         #vehicle state
         self.vehicle_current_velocity = 0.0 #in meters per second
@@ -110,7 +111,7 @@ class PurePursuit(Node):
 
         self.lookahead_m = 0.45           #lookahead to find out steering angle
 
-        self.speed_factor = 1.1          #how much of the speed do we want to apply?
+        self.speed_factor = 1.1 #0.9          #how much of the speed do we want to apply?
         self.speed_min = 2.0             #minimum speed
         self.speed_max = 6.0             #maximum speed
 
@@ -124,8 +125,8 @@ class PurePursuit(Node):
 
 
         self.create_timer(1.0, self.debug_publish_raceline)
-        self.create_timer(1.0/30.0, self.dodrive)
-        self.create_timer(1.0/30.0, self.update_projected_position)
+        self.create_timer(1.0/50.0, self.dodrive)
+        self.create_timer(1.0/50.0, self.update_projected_position)
 
     def update_projected_position(self):
         delta_m = self.actuator_latency_s * self.vehicle_current_velocity 
