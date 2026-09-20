@@ -120,6 +120,8 @@ class MPCController():
         return raceline
     
 
+    def reset_map(self):
+        self.__map = self.__static_map.copy()
 
     def callback_new_laser(self, msg, x_vehicle_map_m, y_vehicle_map_m, yaw_vehicle_map):
         #remove offset from vehicle pos
@@ -151,6 +153,10 @@ class MPCController():
             idx = i #looking down the x axis, incrementing to left
             angle_rad = yaw_vehicle_map - (i * msg.angle_increment + msg.angle_min) #angle in map coordinate system
             distance_m = msg.ranges[idx]
+
+            if distance_m > 10.0 or distance_m < 0.4:
+                continue
+
             distance_px = distance_m/resolution
 
             #compute pixel in map:
@@ -279,7 +285,7 @@ class MPCController():
 
 
         #consider internal model for position smoothing
-        #x_vehicle_map, y_vehicle_map, vehicle_yaw = self.get_vehicle_pose(x_vehicle_map, y_vehicle_map, vehicle_yaw)
+        x_vehicle_map, y_vehicle_map, vehicle_yaw = self.get_vehicle_pose(x_vehicle_map, y_vehicle_map, vehicle_yaw)
         
         #update fine trajectory to reflect vehicle position:
         index_on_fine_trajectory = self.compute_index_on_trajectory(self.__current_trajectory_fine, x_vehicle_map, y_vehicle_map, False, startIndex=0)
@@ -307,14 +313,16 @@ class MPCController():
         
         
         #get steering angle from trajectory
-        target_index = 2    #we try heading towards the 2nd point of the fine trajectory
+        target_index = 3    #we try heading towards the 2nd point of the fine trajectory
         input_angle = 1000
         angle = 0.0
 
         #if vehicle speed is high, it might help to aim for further away points to stabelize the trajectory:
-        if vehicle_speed > 3.0:
-            target_index = min( int(vehicle_speed*2), len(s.x)-1)
+        if vehicle_speed > 1.5:
+            target_index = math.ceil(vehicle_speed*2.5)
 
+        #make sure we are not out of bounds:
+        target_index = min( target_index, len(s.x)-1)
 
 
             
@@ -492,7 +500,7 @@ class MPCController():
             self.FigCounter += 1
             #end debug
         """
-
+        f = None    #current candidate trajectory in case a collision needs to be resolved.
         #try to repair trajectory if we have a collision:
         if collision_index >= 0:
             count = 0
@@ -514,7 +522,7 @@ class MPCController():
                                             map=self.__map,
                                             num_ctrl_points=num_samples,
                                             apply_smoothing=False,
-                                            idx=int(collision_index/(len(self.__current_trajectory_fine.x)/len(self.__current_trajectory_coarse.x))),
+                                            idx=collision_index, #int(collision_index/(len(self.__current_trajectory_fine.x)/len(self.__current_trajectory_coarse.x))),
                                             use_normal_vector=use_normal_vector,
                                             num_adjacent=1)
                 t3  = time.time()
@@ -544,6 +552,20 @@ class MPCController():
 
         if collision_index >= 0:
             #could not repair trajectory.
+
+            print(f"collision index: {collision_index} (max: {len(f.x)})")
+            
+            """pyplot.imshow(self.__map.get_pixel_map())
+            pyplot.scatter(f.x,f.y, linewidth=1)
+            #pyplot.scatter(f.x,f.y, c=f.velocity_profile, linewidth=1, cmap=pyplot.cm.coolwarm)
+            #pyplot.scatter(self.__current_trajectory_coarse.x[collision_index], self.__current_trajectory_coarse.y[collision_index], c="black", linewidth=0.5)
+            pyplot.savefig(f"/tmp/mpc{self.FigCounter}.png")
+            pyplot.figure().clear()
+            pyplot.clf()
+            pyplot.close('all')
+            self.FigCounter += 1"""
+
+            self.__current_trajectory_coarse = None
             return False
         
 
@@ -577,6 +599,12 @@ class MPCController():
         
         """
         s = self.__current_trajectory_fine
+
+        if len(s.x) <= 2:
+            #trajectory broken
+            self.__current_trajectory_coarse = None
+            return False
+
         #compute velocities
         s.compute_velocity_profile()
         s.velocity_profile[0] = vehicle_speed

@@ -42,7 +42,7 @@ from mpcController import MPCController
 
 import yaml
 
-TOPIC_DRIVE = "/drive"
+TOPIC_DRIVE = "/to_drive"
 TOPIC_LASERSCAN = "/scan"
 TOPIC_ODOMETRY = "/odom"
 TOPIC_RACELINE = "/raceline/trajectory"
@@ -63,9 +63,8 @@ class MPCNodeWaypointFollower(Node):
 
         #configuration
         vehicle_update_rate = config["vehicle_update_rate"]    # updates are sent to the vehicle with this rate
-        collision_resolution_rate = config["collision_resolution_rate"]    # how often to check for collisions
-        lookahead_m = config["lookahead_m"]            # lookahead to prevent collisions
-        points_per_meter= config["points_per_meter"]          # number of points per meter to follow
+        lookahead_m = config["lookahead_m"]                    # lookahead to prevent collisions
+        points_per_meter= config["points_per_meter"]           # number of points per meter to follow
 
         #create publishers
         self.publisher_ackermann        = self.create_publisher(AckermannDriveStamped, TOPIC_DRIVE, 10)
@@ -89,7 +88,7 @@ class MPCNodeWaypointFollower(Node):
         self.map_frame_name     = config["map_frame_name"]
         self.vehicle_frame_name = config["vehicle_frame_name"]
 
-        #self.create_timer(1.0/5.0, self.debug_publish_raceline)
+        #self.create_timer(1.0/1.0, self.debug_publish_raceline)
         self.create_timer(1.0/self.vehicle_update_rate, self.dodrive)
 
         self.create_timer(5.0, self.debug_print_rate)

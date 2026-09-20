@@ -124,14 +124,22 @@ class MPCNodeCollisionResolution(Node):
         self.vehicle_current_velocity = float( math.sqrt( msg.twist.twist.linear.x **2 + msg.twist.twist.linear.y **2) )
 
     def cb_new_laserscan(self, msg: LaserScan):
-        x_vehicle_map, y_vehicle_map, yaw_vehicle_map = self.get_vehicle_position(time=None)#msg.header.stamp)
+        return
+        msgAge = rclpy.time.Time.from_msg(msg.header.stamp).nanoseconds - self.get_clock().now().nanoseconds
+
+        if abs(msgAge) > (0.07 * 1e9):
+            print(f"dropping laser message: too old {msgAge/1e9} seconds", flush=True)
+            self.mpc.reset_map()
+            return
+
+        x_vehicle_map, y_vehicle_map, yaw_vehicle_map = self.get_vehicle_position(time=msg.header.stamp)#msg.header.stamp)
         self.mpc.callback_new_laser(msg, x_vehicle_map, y_vehicle_map, yaw_vehicle_map)
 
 
     def get_vehicle_position(self, time=None):
         
         if time is None:
-            time = rclpy.time.Time() #now
+            time = rclpy.time.Time(seconds=0, nanoseconds=0) #latest
         try:
         
             t = self.tf_buffer.lookup_transform(
@@ -139,12 +147,18 @@ class MPCNodeCollisionResolution(Node):
                                             self.vehicle_frame_name,
                                             time)
         except ExtrapolationException as e:
-            print(e, flush=True)
-            t = self.tf_buffer.lookup_transform(
-                                            self.map_frame_name,
-                                            self.vehicle_frame_name,
-                                            rclpy.time.Time())
-        
+            try:
+                t = self.tf_buffer.lookup_transform(
+                                                self.map_frame_name,
+                                                self.vehicle_frame_name,
+                                                rclpy.time.Time(seconds=0, nanoseconds=0)) #latest
+            except:
+                print("Could not find vehicle position. Map not ready?", flush=True)
+                return 0,0,0    
+        except:
+            print("Could not find vehicle position. Map not ready?", flush=True)
+            return 0,0,0
+
         x_vehicle_map = t.transform.translation.x
         y_vehicle_map = t.transform.translation.y
         
@@ -178,7 +192,7 @@ class MPCNodeCollisionResolution(Node):
         if success:
             #publish new trajectory
             msg = Trajectory()
-            msg.header.stamp = rclpy.time.Time().to_msg()
+            msg.header.stamp = self.get_clock().now().to_msg()
             msg.frame_id = "map_pixels"
             
             trajectory =  self.mpc.get_fine_trajectory_pixels()
